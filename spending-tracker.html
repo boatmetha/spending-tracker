@@ -1,0 +1,2069 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>บันทึกรายจ่าย</title>
+<script>
+// PIN variables declared early so inline onclick handlers can access them
+var PIN_KEY = 'spending_pin_hash';
+var pinBuffer = '';
+var pinSetupStage = 0;
+var pinSetupFirst = '';
+</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" onerror="window.XLSX_FAILED=true"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<!-- Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Google API client -->
+<script src="https://apis.google.com/js/api.js" async defer onload="gapiLoaded()"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f4f0; --surface: #ffffff; --surface2: #f0efe9;
+    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.28);
+    --text: #1a1a1a; --text2: #666; --text3: #999;
+    --green: #1D9E75; --green-light: #f0fdf8; --green-dark: #0F6E56;
+    --red: #a32d2d; --red-light: #fcebeb;
+    --radius: 8px; --radius-lg: 12px;
+  }
+  body { font-family: 'Sarabun', 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .app { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+  /* Header */
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.75rem; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .header-icon { width: 42px; height: 42px; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--text2); }
+  .app-title { font-size: 20px; font-weight: 600; }
+  .app-sub { font-size: 13px; color: var(--text2); margin-top: 2px; }
+
+  /* Drive status */
+  .drive-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; font-size: 12px; font-weight: 500; cursor: pointer; border: 0.5px solid var(--border2); background: var(--surface); transition: all 0.15s; }
+  .drive-pill:hover { background: var(--surface2); }
+  .drive-pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .drive-pill.connected .dot { background: var(--green); }
+  .drive-pill.disconnected .dot { background: #ccc; }
+  .drive-pill.syncing .dot { background: #BA7517; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 4px; margin-bottom: 1.5rem; }
+  .tab { flex: 1; padding: 8px 10px; border: none; background: transparent; border-radius: var(--radius); font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text2); transition: all 0.15s; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 5px; }
+  .tab.active { background: var(--bg); color: var(--text); }
+  .tab:hover:not(.active) { background: var(--surface2); }
+
+  /* Cards */
+  .card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1rem; }
+  .card-title { font-size: 11px; font-weight: 600; margin-bottom: 1rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* Form */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group.full { grid-column: 1 / -1; }
+  label { font-size: 12px; color: var(--text2); font-weight: 500; }
+  input, select, textarea { width: 100%; padding: 8px 10px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 14px; background: var(--surface); color: var(--text); font-family: inherit; transition: border-color 0.15s; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--border2); }
+  textarea { resize: vertical; min-height: 72px; }
+
+  /* Autocomplete */
+  .autocomplete-wrapper { position: relative; }
+  .dropdown { position: absolute; top: calc(100% + 3px); left: 0; right: 0; background: var(--surface); border: 0.5px solid var(--border2); border-radius: var(--radius); z-index: 200; max-height: 180px; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+  .dropdown-item { padding: 9px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .dropdown-item:hover { background: var(--surface2); }
+
+  /* Buttons */
+  .btn { padding: 9px 18px; border: 0.5px solid var(--border2); border-radius: var(--radius); font-size: 13px; font-weight: 500; cursor: pointer; background: transparent; color: var(--text); font-family: inherit; display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s; }
+  .btn:hover { background: var(--surface2); }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: var(--text); color: #fff; border-color: transparent; }
+  .btn-primary:hover { opacity: 0.85; background: var(--text); }
+  .btn-success { background: var(--green); color: #fff; border-color: transparent; }
+  .btn-success:hover { opacity: 0.88; background: var(--green); }
+  .btn-danger { border-color: rgba(226,75,74,0.2); color: var(--red); }
+  .btn-danger:hover { background: var(--red-light); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 1.25rem; }
+
+  /* Confirm */
+  .confirm-card { background: var(--surface); border: 2px solid var(--green); border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1rem; }
+  .confirm-title { font-size: 15px; font-weight: 600; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 8px; color: var(--green-dark); }
+  .confirm-rows { border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 1.25rem; }
+  .confirm-row { display: flex; align-items: flex-start; padding: 11px 14px; border-bottom: 0.5px solid var(--border); }
+  .confirm-row:last-child { border-bottom: none; }
+  .confirm-row.amount-row { background: var(--green-light); }
+  .confirm-label { font-size: 12px; color: var(--text2); width: 130px; flex-shrink: 0; padding-top: 2px; display: flex; align-items: center; gap: 5px; }
+  .confirm-value { font-size: 14px; flex: 1; word-break: break-word; }
+  .confirm-value.big { font-size: 22px; font-weight: 600; color: var(--green-dark); }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* Records */
+  .records-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .records-header h2 { font-size: 15px; font-weight: 600; }
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
+  .filter-bar input, .filter-bar select { flex: 1; min-width: 130px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); padding: 8px 10px; border-bottom: 0.5px solid var(--border); text-align: left; white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 0.5px solid rgba(0,0,0,0.07); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+  .badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .amount-cell { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .empty { text-align: center; padding: 3rem; color: var(--text2); font-size: 14px; }
+  .del-row { color: var(--text3); background: transparent; border: none; cursor: pointer; padding: 5px; border-radius: 4px; font-size: 15px; display: flex; align-items: center; }
+  .del-row:hover { color: var(--red); background: var(--red-light); }
+  .rec-total { text-align: right; padding-top: 12px; font-size: 13px; color: var(--text2); }
+
+  /* Categories */
+  .cat-list { display: flex; flex-direction: column; gap: 8px; }
+  .cat-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--surface2); border-radius: var(--radius); }
+  .cat-dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 10px; flex-shrink: 0; }
+  .cat-name { font-size: 14px; display: flex; align-items: center; }
+  .add-cat-row { display: flex; gap: 8px; margin-top: 1rem; }
+  .add-cat-row input { flex: 1; }
+  .notice { font-size: 12px; color: var(--text2); margin-top: 8px; }
+
+  /* Summary */
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+  .metric { background: var(--surface2); border-radius: var(--radius); padding: 1rem; }
+  .metric-label { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+  .metric-value { font-size: 21px; font-weight: 600; }
+
+  /* Drive info box */
+  .info-box { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius); font-size: 13px; margin-bottom: 1rem; }
+  .info-box.blue { background: #e6f1fb; color: #185FA5; }
+  .info-box.green { background: var(--green-light); color: var(--green-dark); }
+  .info-box.orange { background: #faeeda; color: #854F0B; }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: #fff; padding: 10px 18px; border-radius: var(--radius); font-size: 13px; z-index: 9999; opacity: 0; transition: opacity 0.2s; pointer-events: none; display: flex; align-items: center; gap: 8px; }
+
+  /* Unsync warning banner */
+  #sync-warning { display: none; background: #faeeda; border: 1px solid #EF9F27; border-radius: var(--radius); padding: 12px 16px; margin-bottom: 1rem; font-size: 13px; color: #633806; align-items: flex-start; gap: 10px; }
+  #sync-warning.show { display: flex; }
+  #sync-warning i { font-size: 18px; flex-shrink: 0; margin-top: 1px; color: #BA7517; }
+  #sync-warning .warn-body { flex: 1; }
+  #sync-warning .warn-title { font-weight: 600; margin-bottom: 3px; }
+  #sync-warning .warn-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .btn-warn { padding: 6px 14px; border: 1px solid #BA7517; border-radius: var(--radius); font-size: 12px; font-weight: 500; cursor: pointer; background: transparent; color: #633806; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; transition: all 0.15s; }
+  .btn-warn:hover { background: #fac77533; }
+  .btn-warn.primary { background: #BA7517; color: #fff; border-color: transparent; }
+  .btn-warn.primary:hover { opacity: 0.88; }
+
+  /* Slip scanner */
+  .slip-upload-zone { border: 2px dashed var(--border2); border-radius: var(--radius-lg); padding: 2rem; text-align: center; cursor: pointer; transition: all 0.15s; color: var(--text2); }
+  .slip-upload-zone:hover, .slip-upload-zone.drag { border-color: var(--green); background: var(--green-light); color: var(--green-dark); }
+  .slip-upload-zone i { font-size: 32px; display: block; margin-bottom: 8px; }
+  .slip-upload-zone p { font-size: 14px; margin: 0; }
+  .slip-upload-zone small { font-size: 12px; opacity: .7; }
+  .slip-grid { display: flex; flex-direction: column; gap: 12px; margin-top: 1rem; }
+  .slip-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+  .slip-card.error { border-color: #e24b4a66; }
+  .slip-card.success { border-color: #1D9E7566; }
+  .slip-card-inner { display: grid; grid-template-columns: 120px 1fr; gap: 0; }
+  .slip-thumb { width: 120px; min-height: 160px; object-fit: cover; display: block; background: var(--surface2); }
+  .slip-thumb-placeholder { width: 120px; min-height: 160px; background: var(--surface2); display: flex; align-items: center; justify-content: center; color: var(--text2); font-size: 28px; }
+  .slip-body { padding: 14px; flex: 1; }
+  .slip-status { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+  .slip-status.reading { color: #BA7517; }
+  .slip-status.done { color: var(--green-dark); }
+  .slip-status.err { color: var(--red); }
+  .slip-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .slip-field { display: flex; flex-direction: column; gap: 3px; }
+  .slip-field.full { grid-column: 1/-1; }
+  .slip-field label { font-size: 11px; color: var(--text2); font-weight: 500; }
+  .slip-field input, .slip-field select { padding: 6px 8px; font-size: 13px; }
+  .slip-remove { background: none; border: none; cursor: pointer; color: var(--text2); padding: 4px; border-radius: 4px; font-size: 16px; }
+  .slip-remove:hover { color: var(--red); background: var(--red-light); }
+  .slip-card-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: var(--surface2); border-bottom: 0.5px solid var(--border); font-size: 13px; font-weight: 500; }
+  .api-key-row { display: flex; gap: 8px; align-items: center; margin-bottom: 1rem; }
+  .api-key-row input { flex: 1; font-family: monospace; font-size: 12px; }
+  .api-key-saved { font-size: 11px; color: var(--green-dark); display: none; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 540px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .form-group.full { grid-column: 1; }
+    .confirm-label { width: 100px; }
+    .header { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .slip-card-inner { grid-template-columns: 80px 1fr; }
+    .slip-thumb, .slip-thumb-placeholder { width: 80px; }
+    .slip-fields { grid-template-columns: 1fr; }
+    .slip-field.full { grid-column: 1; }
+  }
+  /* Split amount section */
+  .split-section { margin-top:10px; border-top:0.5px solid var(--border); padding-top:10px; }
+  .split-toggle-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .split-toggle-label { font-size:12px; font-weight:600; color:var(--text2); }
+  .toggle-btn { padding:4px 10px; border:0.5px solid var(--border2); border-radius:99px; font-size:11px; font-weight:600; cursor:pointer; background:transparent; color:var(--text2); font-family:inherit; transition:all .15s; }
+  .toggle-btn.active { background:var(--green); color:#fff; border-color:transparent; }
+  .split-rows { display:flex; flex-direction:column; gap:6px; }
+  .split-row { display:grid; grid-template-columns:1fr 110px 24px; gap:6px; align-items:center; }
+  .split-row select, .split-row input { padding:5px 7px; font-size:12px; }
+  .split-remove-btn { background:none; border:none; cursor:pointer; color:var(--text2); font-size:15px; padding:2px; border-radius:4px; display:flex; align-items:center; }
+  .split-remove-btn:hover { color:var(--red); background:var(--red-light); }
+  .split-add-btn { margin-top:6px; font-size:12px; padding:5px 10px; }
+  .split-total-row { display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-top:8px; padding:8px 10px; border-radius:var(--radius); background:var(--surface2); }
+  .split-remaining { font-weight:600; }
+  .split-remaining.ok { color:var(--green-dark); }
+  .split-remaining.over { color:var(--red); }
+  .split-remaining.under { color:#BA7517; }
+  @media (max-width:540px) { .split-row { grid-template-columns:1fr 95px 22px; } }
+
+
+  /* แผนก checkboxes */
+  .dept-checkbox-group { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0; }
+  .dept-checkbox-item { display:none; }
+  .dept-checkbox-label { display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border:0.5px solid var(--border2); border-radius:99px; font-size:12px; font-weight:500; cursor:pointer; transition:all .15s; user-select:none; color:var(--text2); background:var(--surface); }
+  .dept-checkbox-item:checked + .dept-checkbox-label { background:var(--text); color:#fff; border-color:transparent; }
+  .dept-checkbox-label:hover { background:var(--surface2); }
+  .dept-checkbox-item:checked + .dept-checkbox-label:hover { opacity:.88; background:var(--text); }
+
+  /* Expense category select with description */
+  .expense-cat-wrap { position:relative; }
+  .expense-cat-select { width:100%; padding:8px 10px; border:0.5px solid var(--border); border-radius:var(--radius); font-size:14px; background:var(--surface); color:var(--text); font-family:inherit; appearance:none; -webkit-appearance:none; cursor:pointer; }
+  .expense-cat-select:focus { outline:none; border-color:var(--border2); }
+  .expense-cat-hint { font-size:11px; color:var(--text2); margin-top:4px; min-height:16px; font-style:italic; }
+
+  /* ── PIN LOCK ── */
+  #pin-overlay { position:fixed; inset:0; background:var(--bg); z-index:9000; display:flex; align-items:center; justify-content:center; }
+  .pin-box { background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:2rem 2rem 1.5rem; width:320px; text-align:center; box-shadow:0 8px 32px rgba(0,0,0,0.08); }
+  .pin-logo { width:48px; height:48px; background:var(--text); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; margin:0 auto 1rem; font-size:22px; color:#fff; }
+  .pin-title { font-size:17px; font-weight:600; margin-bottom:4px; }
+  .pin-sub { font-size:13px; color:var(--text2); margin-bottom:1.25rem; }
+  .pin-dots { display:flex; gap:10px; justify-content:center; margin-bottom:1.25rem; }
+  .pin-dot { width:14px; height:14px; border-radius:50%; border:2px solid var(--border2); background:transparent; transition:all .15s; }
+  .pin-dot.filled { background:var(--text); border-color:var(--text); }
+  .pin-dot.error { background:var(--red); border-color:var(--red); }
+  .pin-keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:1rem; }
+  .pin-key { padding:14px; border:0.5px solid var(--border); border-radius:var(--radius); font-size:18px; font-weight:500; cursor:pointer; background:var(--surface); color:var(--text); transition:all .1s; font-family:inherit; }
+  .pin-key:hover { background:var(--surface2); }
+  .pin-key:active { transform:scale(.94); background:var(--surface2); }
+  .pin-key.del { font-size:15px; color:var(--text2); }
+  .pin-error-msg { font-size:12px; color:var(--red); min-height:18px; margin-bottom:.5rem; }
+  .pin-setup-step { font-size:12px; color:var(--text2); margin-bottom:.25rem; }
+
+  /* ── OFFLINE WARNING ── */
+  #offline-bar { display:none; background:#faeeda; border-bottom:1px solid #EF9F27; padding:8px 16px; font-size:13px; color:#633806; text-align:center; position:fixed; top:0; left:0; right:0; z-index:8000; }
+  #offline-bar.show { display:block; }
+  body.has-offline-bar .app { padding-top:3rem; }
+
+  /* ── LAST UPDATED BAR ── */
+  .last-updated-bar { font-size:11px; color:var(--text2); text-align:right; margin-bottom:.75rem; display:flex; align-items:center; justify-content:flex-end; gap:6px; }
+  .last-updated-bar .user-avatar { width:20px; height:20px; border-radius:50%; object-fit:cover; }
+
+  /* ── USER PILL ── */
+  .user-pill { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:99px; background:var(--surface); border:0.5px solid var(--border); font-size:12px; cursor:pointer; }
+  .user-pill img { width:20px; height:20px; border-radius:50%; }
+
+  /* ── DELETED ENTRIES ── */
+  .deleted-badge { display:inline-flex; align-items:center; gap:3px; background:#fcebeb; color:var(--red); border-radius:99px; padding:2px 7px; font-size:10px; font-weight:600; }
+  .show-deleted-toggle { font-size:12px; color:var(--text2); cursor:pointer; text-decoration:underline; }
+</style>
+</head>
+<body>
+<!-- OFFLINE BAR -->
+<div id="offline-bar"><i class="ti ti-wifi-off" style="margin-right:6px"></i>ไม่มีการเชื่อมต่ออินเทอร์เน็ต — ข้อมูลบันทึกใน browser แต่ยังไม่ได้ซิงค์ Drive</div>
+
+<!-- PIN OVERLAY -->
+<div id="pin-overlay">
+  <div class="pin-box">
+    <div class="pin-logo"><i class="ti ti-wallet"></i></div>
+    <div class="pin-title" id="pin-title">บันทึกรายจ่าย</div>
+    <div class="pin-sub" id="pin-sub">กรอก PIN เพื่อเข้าใช้งาน</div>
+    <div class="pin-setup-step" id="pin-setup-step"></div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-error-msg" id="pin-error"></div>
+    <div class="pin-keypad">
+      <button class="pin-key" onclick="pinKey('1')">1</button>
+      <button class="pin-key" onclick="pinKey('2')">2</button>
+      <button class="pin-key" onclick="pinKey('3')">3</button>
+      <button class="pin-key" onclick="pinKey('4')">4</button>
+      <button class="pin-key" onclick="pinKey('5')">5</button>
+      <button class="pin-key" onclick="pinKey('6')">6</button>
+      <button class="pin-key" onclick="pinKey('7')">7</button>
+      <button class="pin-key" onclick="pinKey('8')">8</button>
+      <button class="pin-key" onclick="pinKey('9')">9</button>
+      <button class="pin-key" onclick="pinKey('')"></button>
+      <button class="pin-key" onclick="pinKey('0')">0</button>
+      <button class="pin-key del" onclick="pinBackspace()"><i class="ti ti-backspace"></i></button>
+    </div>
+    <div style="font-size:11px;color:var(--text2)" id="pin-version">v1.0</div>
+  </div>
+</div>
+
+<div class="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon"><i class="ti ti-wallet"></i></div>
+      <div>
+        <div class="app-title">บันทึกรายจ่าย</div>
+        <div class="app-sub">บันทึก จัดแผนก และส่งออกข้อมูลการใช้จ่าย</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="drive-pill" class="drive-pill disconnected" onclick="toggleDriveAuth()">
+        <span class="dot"></span>
+        <span id="drive-pill-text">เชื่อมต่อ Google Drive</span>
+      </div>
+      <div id="user-pill" class="user-pill" style="display:none" onclick="showUserMenu()">
+        <img id="user-avatar" src="" alt="">
+        <span id="user-name-short"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('add')"><i class="ti ti-plus"></i> เพิ่มรายการ</button>
+    <button class="tab" onclick="switchTab('slip')"><i class="ti ti-scan"></i> อ่านสลิป</button>
+    <button class="tab" onclick="switchTab('records')"><i class="ti ti-list"></i> รายการทั้งหมด</button>
+    <button class="tab" onclick="switchTab('categories')"><i class="ti ti-tag"></i> แผนก</button>
+    <button class="tab" onclick="switchTab('export')"><i class="ti ti-download"></i> ส่งออก</button>
+  </div>
+
+  <!-- Sync warning banner -->
+  <div id="sync-warning">
+    <i class="ti ti-cloud-off"></i>
+    <div class="warn-body">
+      <div class="warn-title">ข้อมูลยังไม่ได้ซิงค์กับ Google Drive</div>
+      <div id="sync-warn-detail">มีรายการที่ยังไม่ได้บันทึกไปยัง Drive — อาจสูญหายหากล้าง browser</div>
+      <div class="warn-actions">
+        <button class="btn-warn primary" onclick="retrySyncNow()"><i class="ti ti-refresh"></i> ซิงค์ตอนนี้</button>
+        <button class="btn-warn" onclick="toggleDriveAuth()"><i class="ti ti-brand-google-drive"></i> เชื่อมต่อ Drive</button>
+        <button class="btn-warn" onclick="dismissWarning()" style="margin-left:auto;border-color:transparent;color:var(--text2)"><i class="ti ti-x"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LAST UPDATED BAR -->
+  <div class="last-updated-bar" id="last-updated-bar" style="display:none">
+    <i class="ti ti-clock" style="font-size:12px"></i>
+    <span id="last-updated-text"></span>
+    <img id="last-updated-avatar" class="user-avatar" src="" style="display:none">
+  </div>
+
+  <!-- TAB: อ่านสลิป -->
+  <div id="tab-slip" style="display:none">
+    <!-- Info bar -->
+    <div class="card" style="display:flex;align-items:center;gap:12px;padding:12px 16px">
+      <i class="ti ti-shield-check" style="font-size:22px;color:var(--green);flex-shrink:0"></i>
+      <div>
+        <div style="font-size:13px;font-weight:600">OCR ในเครื่อง — ฟรี 100% ไม่ส่งรูปออกไปไหน</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">ใช้ Tesseract.js อ่านข้อความในรูปภายใน browser ของคุณเท่านั้น</div>
+      </div>
+      <div id="ocr-engine-status" style="margin-left:auto;font-size:11px;color:var(--text2);white-space:nowrap"></div>
+    </div>
+
+    <!-- Upload zone -->
+    <div class="card">
+      <div class="card-title">อัปโหลดสลิปโอนเงิน</div>
+      <div class="slip-upload-zone" id="slip-upload-zone"
+        onclick="document.getElementById('slip-file-input').click()"
+        ondragover="event.preventDefault();this.classList.add('drag')"
+        ondragleave="this.classList.remove('drag')"
+        ondrop="event.preventDefault();this.classList.remove('drag');handleSlipFiles(event.dataTransfer.files)">
+        <i class="ti ti-photo-scan"></i>
+        <p>คลิกหรือลากรูปสลิปมาวางที่นี่</p>
+        <small>รองรับหลายรูปพร้อมกัน · JPG, PNG, HEIC</small>
+      </div>
+      <input type="file" id="slip-file-input" accept="image/*" multiple style="display:none" onchange="handleSlipFiles(this.files)">
+    </div>
+
+    <!-- Slip cards -->
+    <div id="slip-grid" class="slip-grid"></div>
+
+    <!-- Confirm all button -->
+    <div id="slip-confirm-bar" style="display:none;margin-top:4px">
+      <div class="card" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div style="font-size:13px;color:var(--text2)"><span id="slip-confirm-count"></span></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="clearAllSlips()"><i class="ti ti-trash"></i> ล้างทั้งหมด</button>
+          <button class="btn btn-success" onclick="confirmAllSlips()"><i class="ti ti-check"></i> ยืนยันบันทึกทั้งหมด</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: เพิ่มรายการ -->
+  <div id="tab-add">
+    <div id="form-section">
+      <div class="card">
+        <div class="card-title">รายการจ่ายเงินใหม่</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label><i class="ti ti-calendar" style="font-size:12px;margin-right:4px"></i>วันที่</label>
+            <input type="date" id="f-datetime">
+          </div>
+          <div class="form-group">
+            <label><i class="ti ti-currency-baht" style="font-size:12px;margin-right:4px"></i>จำนวนเงิน (฿)</label>
+            <input type="number" id="f-amount" placeholder="0.00" min="0" step="0.01">
+          </div>
+          <div class="form-group">
+            <label><i class="ti ti-user" style="font-size:12px;margin-right:4px"></i>จ่ายให้</label>
+            <input type="text" id="f-transfer" placeholder="ชื่อ / บัญชี">
+          </div>
+          <div class="form-group">
+            <label><i class="ti ti-building" style="font-size:12px;margin-right:4px"></i>บริษัท / ร้านค้า</label>
+            <div class="autocomplete-wrapper">
+              <input type="text" id="f-company" placeholder="พิมพ์ชื่อบริษัทหรือร้านค้า..." autocomplete="off"
+                oninput="onCompanyInput()" onblur="setTimeout(()=>hideDrop(),150)">
+              <div class="dropdown" id="co-drop" style="display:none"></div>
+            </div>
+          </div>
+          <div class="form-group full">
+            <label><i class="ti ti-tag" style="font-size:12px;margin-right:4px"></i>แผนก</label>
+            <div class="dept-checkbox-group" id="f-category-checks"></div>
+          </div>
+          <div class="form-group full">
+            <label><i class="ti ti-notes" style="font-size:12px;margin-right:4px"></i>รายละเอียด / หมายเหตุ</label>
+            <textarea id="f-details" placeholder="รายละเอียดเพิ่มเติม..."></textarea>
+          </div>
+          <div class="form-group full">
+            <label><i class="ti ti-briefcase" style="font-size:12px;margin-right:4px"></i>ประเภทค่าใช้จ่าย (Expense Category)</label>
+            <div class="expense-cat-wrap">
+              <select id="f-expense-cat" class="expense-cat-select" onchange="updateExpenseHint()">
+                <option value="">— เลือกประเภท —</option>
+                <option value="ต้นทุนขาย (Cost of Goods Sold)">ต้นทุนขาย (Cost of Goods Sold)</option>
+                <option value="ค่าแรงงาน (Labor)">ค่าแรงงาน (Labor)</option>
+                <option value="ค่าสาธารณูปโภค (Utilities)">ค่าสาธารณูปโภค (Utilities)</option>
+                <option value="ค่าเช่า (Rent)">ค่าเช่า (Rent)</option>
+                <option value="การตลาด (Marketing)">การตลาด (Marketing)</option>
+                <option value="อุปกรณ์และซ่อมบำรุง (Equipment &amp; Maintenance)">อุปกรณ์และซ่อมบำรุง (Equipment &amp; Maintenance)</option>
+                <option value="ค่าใช้จ่ายทั่วไป (General &amp; Admin)">ค่าใช้จ่ายทั่วไป (General &amp; Admin)</option>
+              </select>
+              <div class="expense-cat-hint" id="expense-cat-hint"></div>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="clearForm()"><i class="ti ti-x"></i> ล้างข้อมูล</button>
+          <button class="btn btn-primary" onclick="previewEntry()"><i class="ti ti-eye"></i> ตรวจสอบรายการ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- หน้ายืนยัน -->
+    <div id="confirm-section" style="display:none">
+      <div class="confirm-card">
+        <div class="confirm-title"><i class="ti ti-clipboard-check" style="font-size:20px"></i> ตรวจสอบรายการก่อนบันทึก</div>
+        <div class="confirm-rows" id="confirm-rows"></div>
+        <div class="confirm-actions">
+          <button class="btn" onclick="backToForm()"><i class="ti ti-arrow-left"></i> แก้ไข</button>
+          <button class="btn btn-success" onclick="confirmEntry()"><i class="ti ti-check"></i> ยืนยันและบันทึก</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: รายการทั้งหมด -->
+  <div id="tab-records" style="display:none">
+    <div class="card">
+      <div class="records-header">
+        <h2>รายการทั้งหมด</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="show-deleted-toggle" onclick="toggleShowDeleted()" id="deleted-toggle-btn">แสดงรายการที่ลบ</span>
+          <button class="btn btn-sm" onclick="switchTab('export')"><i class="ti ti-download"></i> ส่งออก</button>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <input type="text" id="rec-search" placeholder="ค้นหา..." oninput="renderRecords()">
+        <select id="rec-cat" onchange="renderRecords()"><option value="">ทุกแผนก</option></select>
+        <input type="date" id="rec-from" onchange="renderRecords()" title="ตั้งแต่วันที่">
+        <input type="date" id="rec-to" onchange="renderRecords()" title="ถึงวันที่">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>วันที่</th>
+            <th>จ่ายให้</th>
+            <th>บริษัท / ร้านค้า</th>
+            <th>แผนก</th>
+            <th>รายละเอียด</th>
+            <th>ประเภทค่าใช้จ่าย</th>
+            <th style="text-align:right">จำนวนเงิน (฿)</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="records-body"></tbody>
+        </table>
+      </div>
+      <div class="rec-total" id="rec-total"></div>
+    </div>
+  </div>
+
+  <!-- TAB: แผนก -->
+  <div id="tab-categories" style="display:none">
+    <div class="card">
+      <div class="card-title">จัดการแผนก</div>
+      <div class="cat-list" id="cat-list"></div>
+      <div class="add-cat-row">
+        <input type="text" id="new-cat" placeholder="ชื่อแผนกใหม่..." onkeydown="if(event.key==='Enter')addCategory()">
+        <button class="btn btn-primary" onclick="addCategory()"><i class="ti ti-plus"></i> เพิ่ม</button>
+      </div>
+      <p class="notice"><i class="ti ti-info-circle" style="font-size:12px;margin-right:4px"></i>แผนกที่มีรายการอยู่แล้วไม่สามารถลบได้</p>
+    </div>
+  </div>
+
+  <!-- TAB: ส่งออก -->
+  <div id="tab-export" style="display:none">
+    <div class="card">
+      <div class="card-title">สรุปยอดการใช้จ่าย</div>
+      <div class="summary-grid" id="summary-grid"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Google Drive</div>
+      <div id="drive-export-info"></div>
+      <div id="last-sync-time" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-success" id="btn-drive-sync" onclick="retrySyncNow()" style="display:none">
+          <i class="ti ti-cloud-upload"></i> ซิงค์ตอนนี้
+        </button>
+        <button class="btn" id="btn-view-backups" onclick="showBackupList()" style="display:none">
+          <i class="ti ti-history"></i> ดู Backups
+        </button>
+        <button class="btn" id="btn-drive-connect-export" onclick="toggleDriveAuth()">
+          <i class="ti ti-brand-google-drive"></i> เชื่อมต่อ Google Drive
+        </button>
+      </div>
+      <!-- Backup list panel -->
+      <div id="backup-panel" style="display:none;margin-top:1rem">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+          ไฟล์ Backup ใน Drive
+        </div>
+        <div class="info-box blue" style="margin-bottom:10px">
+          <i class="ti ti-lock" style="font-size:16px;flex-shrink:0"></i>
+          <span>ไฟล์ backup เป็น <strong>read-only snapshot</strong> — ไม่มีการเขียนทับ แต่ละไฟล์คือสถานะ ณ เวลานั้น เก็บล่าสุด ${MAX_BACKUPS} ไฟล์</span>
+        </div>
+        <div id="backup-list-content" style="font-size:13px;color:var(--text2)">กำลังโหลด...</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">ส่งออกเป็น Excel</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">ดาวน์โหลดไฟล์ Excel ที่มีข้อมูลการใช้จ่ายทั้งหมด ประกอบด้วยชีต <strong>ยอดรวมทั้งหมด</strong> และชีตแยกสำหรับแต่ละแผนก</p>
+      <button class="btn btn-primary" onclick="exportExcel()"><i class="ti ti-file-spreadsheet"></i> ดาวน์โหลด Excel (.xlsx)</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════
+   CONFIG — แก้ไข CLIENT_ID ก่อนใช้งาน
+   ═══════════════════════════════════════════ */
+const GDRIVE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID_HERE'; // ← ใส่ Client ID จาก Google Cloud Console
+const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const DB_FILENAME = 'spending-tracker-db.json';
+const DB_FOLDER_NAME = 'SpendingTracker';
+const BACKUP_FOLDER_NAME = 'backups';
+const MAX_BACKUPS = 30; // เก็บ backup สูงสุด 30 ไฟล์
+
+/* ═══════════════════════════════════════════
+   STATE
+   ═══════════════════════════════════════════ */
+const PALETTE = ['#1D9E75','#D85A30','#378ADD','#BA7517','#D4537E','#639922','#7F77DD','#3C3489','#885500','#185FA5'];
+const DEFAULT_CATS = ['Milkbar','Taihu','Bakelab','Nooch Coffee','ครัวร้อน'];
+let data = { entries: [], categories: [...DEFAULT_CATS], companies: [], _version: 0, _lastUpdatedBy: '', _lastUpdatedAt: '', _lastUpdatedAvatar: '' };
+let pendingEntry = null;
+let driveState = { signedIn: false, fileId: null, folderId: null, backupFolderId: null, tokenClient: null, gapiReady: false, pendingSync: false, syncFailCount: 0, retryTimer: null, lastBackupTime: 0, dbVersion: 0, currentUser: null, tokenRefreshTimer: null };
+
+/* ═══════════════════════════════════════════
+   LOCAL STORAGE
+   ═══════════════════════════════════════════ */
+function saveLocal() {
+  try { localStorage.setItem('spending_data_th', JSON.stringify(data)); } catch(e){}
+}
+function loadLocal() {
+  try {
+    const s = localStorage.getItem('spending_data_th') || localStorage.getItem('spending_data_th_local') || localStorage.getItem('spending_data_local');
+    if (s) {
+      data = JSON.parse(s);
+      // migrate บ้านเค้ก → Bakelab
+      data.categories = data.categories.map(c => c === 'บ้านเค้ก' ? 'Bakelab' : c);
+      data.entries = data.entries.map(e => e.category === 'บ้านเค้ก' ? {...e, category:'Bakelab'} : e);
+    }
+  } catch(e){}
+  if (!data.categories || !data.categories.length) data.categories = [...DEFAULT_CATS];
+  if (!data.entries) data.entries = [];
+  if (!data.companies) data.companies = [];
+}
+
+/* ═══════════════════════════════════════════
+   GOOGLE DRIVE
+   ═══════════════════════════════════════════ */
+function gapiLoaded() {
+  gapi.load('client', async () => {
+    await gapi.client.init({ discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+    driveState.gapiReady = true;
+    // init token client
+    if (window.google && google.accounts) {
+      initTokenClient();
+    } else {
+      // wait for GSI to load
+      window.addEventListener('load', initTokenClient);
+    }
+    // try silent restore
+    const saved = localStorage.getItem('drive_token');
+    if (saved) {
+      try {
+        const tok = JSON.parse(saved);
+        if (tok.access_token && tok.expires_at > Date.now()) {
+          gapi.client.setToken({ access_token: tok.access_token });
+          driveState.signedIn = true;
+          updateDriveUI(true);
+          loadFromDrive();
+        }
+      } catch(e) {}
+    }
+  });
+}
+
+function initTokenClient() {
+  if (!window.google || !google.accounts || !google.accounts.oauth2) return;
+  driveState.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GDRIVE_CLIENT_ID,
+    scope: GDRIVE_SCOPES,
+    callback: async (resp) => {
+      if (resp.error) { showToast('เชื่อมต่อ Drive ไม่สำเร็จ', true); return; }
+      const expires_at = Date.now() + (resp.expires_in * 1000);
+      localStorage.setItem('drive_token', JSON.stringify({ access_token: resp.access_token, expires_at }));
+      gapi.client.setToken({ access_token: resp.access_token });
+      driveState.signedIn = true;
+      driveState.syncFailCount = 0;
+      // fetch user profile
+      await fetchUserProfile(resp.access_token);
+      updateDriveUI(true);
+      showToast('เชื่อมต่อ Google Drive แล้ว ✓');
+      scheduleTokenRefresh(resp.expires_in);
+      await loadFromDrive();
+      if (driveState.pendingSync) syncToDrive('auto');
+    }
+  });
+}
+
+function toggleDriveAuth() {
+  if (GDRIVE_CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID_HERE') {
+    alert('กรุณาใส่ Google Client ID ใน GDRIVE_CLIENT_ID ก่อนใช้งาน Drive\n\nดูวิธีตั้งค่าใน README.md ที่แนบมาด้วย');
+    return;
+  }
+  if (driveState.signedIn) {
+    // sign out
+    localStorage.removeItem('drive_token');
+    gapi.client.setToken(null);
+    driveState.signedIn = false;
+    driveState.fileId = null;
+    updateDriveUI(false);
+    showToast('ออกจาก Google Drive แล้ว');
+  } else {
+    if (!driveState.tokenClient) { initTokenClient(); }
+    if (driveState.tokenClient) driveState.tokenClient.requestAccessToken({ prompt: 'consent' });
+  }
+}
+
+function updateDriveUI(connected) {
+  const pill = document.getElementById('drive-pill');
+  const pillText = document.getElementById('drive-pill-text');
+  const btnSync = document.getElementById('btn-drive-sync');
+  const btnConnect = document.getElementById('btn-drive-connect-export');
+  const btnBackups = document.getElementById('btn-view-backups');
+  const infoBox = document.getElementById('drive-export-info');
+  const lastSync = document.getElementById('last-sync-time');
+  if (connected) {
+    pill.className = 'drive-pill connected';
+    pillText.textContent = 'Drive: เชื่อมต่อแล้ว';
+    if (btnSync) btnSync.style.display = 'inline-flex';
+    if (btnConnect) btnConnect.style.display = 'none';
+    if (btnBackups) btnBackups.style.display = 'inline-flex';
+    if (infoBox) infoBox.innerHTML = `<div class="info-box green" style="margin-bottom:10px"><i class="ti ti-circle-check" style="font-size:18px;flex-shrink:0"></i><div><div>เชื่อมต่อ Google Drive แล้ว — ซิงค์อัตโนมัติทุก transaction</div><div style="font-size:12px;margin-top:3px;opacity:.8">หลักฐาน: <strong>${DB_FOLDER_NAME}/${DB_FILENAME}</strong> &nbsp;|&nbsp; Backup: <strong>${DB_FOLDER_NAME}/${BACKUP_FOLDER_NAME}/backup_YYYY-MM-DD.json</strong></div></div></div>`;
+    const savedSync = localStorage.getItem('last_sync_time');
+    if (lastSync && savedSync) lastSync.textContent = `ซิงค์ล่าสุด: ${savedSync}`;
+  } else {
+    pill.className = 'drive-pill disconnected';
+    pillText.textContent = 'เชื่อมต่อ Google Drive';
+    if (btnSync) btnSync.style.display = 'none';
+    if (btnConnect) btnConnect.style.display = 'inline-flex';
+    if (btnBackups) btnBackups.style.display = 'none';
+    if (infoBox) infoBox.innerHTML = `<div class="info-box blue" style="margin-bottom:10px"><i class="ti ti-brand-google-drive" style="font-size:18px;flex-shrink:0"></i><span>เชื่อมต่อ Google Drive เพื่อให้ข้อมูลถูกบันทึกอัตโนมัติและสามารถใช้งานจากหลายอุปกรณ์ได้</span></div>`;
+    if (lastSync) lastSync.textContent = '';
+  }
+}
+
+async function getOrCreateFolder() {
+  if (driveState.folderId) return driveState.folderId;
+  const res = await gapi.client.drive.files.list({
+    q: `name='${DB_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    fields: 'files(id)'
+  });
+  if (res.result.files.length) {
+    driveState.folderId = res.result.files[0].id;
+  } else {
+    const cr = await gapi.client.drive.files.create({
+      resource: { name: DB_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' },
+      fields: 'id'
+    });
+    driveState.folderId = cr.result.id;
+  }
+  return driveState.folderId;
+}
+
+async function getOrCreateBackupFolder(parentId) {
+  if (driveState.backupFolderId) return driveState.backupFolderId;
+  const res = await gapi.client.drive.files.list({
+    q: `name='${BACKUP_FOLDER_NAME}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    fields: 'files(id)'
+  });
+  if (res.result.files.length) {
+    driveState.backupFolderId = res.result.files[0].id;
+  } else {
+    const cr = await gapi.client.drive.files.create({
+      resource: { name: BACKUP_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
+      fields: 'id'
+    });
+    driveState.backupFolderId = cr.result.id;
+  }
+  return driveState.backupFolderId;
+}
+
+async function createBackup(folderId, token) {
+  // Only create one backup per hour max
+  const now = Date.now();
+  if (now - driveState.lastBackupTime < 60 * 60 * 1000) return;
+
+  try {
+    const backupFolderId = await getOrCreateBackupFolder(folderId);
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const backupName = `backup_${ts}.json`;
+    const body = JSON.stringify({ ...data, _backup: { createdAt: new Date().toISOString(), entries: data.entries.length } }, null, 2);
+
+    const meta = { name: backupName, parents: [backupFolderId], mimeType: 'application/json' };
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+    form.append('file', new Blob([body], { type: 'application/json' }));
+    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: form
+    });
+
+    driveState.lastBackupTime = now;
+    localStorage.setItem('last_backup_time', String(now));
+
+    // Prune old backups — keep only MAX_BACKUPS most recent
+    pruneOldBackups(backupFolderId, token);
+  } catch(e) {
+    console.warn('Backup creation failed (non-critical):', e);
+  }
+}
+
+async function pruneOldBackups(backupFolderId, token) {
+  try {
+    const res = await gapi.client.drive.files.list({
+      q: `'${backupFolderId}' in parents and trashed=false`,
+      fields: 'files(id,name,createdTime)',
+      orderBy: 'createdTime desc',
+      pageSize: 100
+    });
+    const files = res.result.files || [];
+    if (files.length <= MAX_BACKUPS) return;
+    // Delete oldest beyond MAX_BACKUPS
+    const toDelete = files.slice(MAX_BACKUPS);
+    for (const f of toDelete) {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    }
+  } catch(e) { console.warn('Prune failed:', e); }
+}
+
+async function syncToDrive(triggeredBy='manual') {
+  if (!driveState.signedIn) {
+    markUnsynced('ยังไม่ได้เชื่อมต่อ Google Drive — กรุณาเชื่อมต่อเพื่อบันทึกข้อมูล');
+    return false;
+  }
+  setPillSyncing(true);
+  try {
+    const token = gapi.client.getToken().access_token;
+    const folderId = await getOrCreateFolder();
+    const body = JSON.stringify(data, null, 2);
+
+    // 1. Update / create main DB file
+    if (!driveState.fileId) {
+      const res = await gapi.client.drive.files.list({
+        q: `name='${DB_FILENAME}' and '${folderId}' in parents and trashed=false`,
+        fields: 'files(id)'
+      });
+      if (res.result.files.length) driveState.fileId = res.result.files[0].id;
+    }
+    if (driveState.fileId) {
+      const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${driveState.fileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } else {
+      const meta = { name: DB_FILENAME, parents: [folderId], mimeType: 'application/json' };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+      form.append('file', new Blob([body], { type: 'application/json' }));
+      const cr = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: form
+      });
+      if (!cr.ok) throw new Error(`HTTP ${cr.status}`);
+      const cj = await cr.json();
+      driveState.fileId = cj.id;
+    }
+
+    // 2. Create timestamped backup (max once per hour, non-blocking)
+    createBackup(folderId, token);
+
+    // 3. Success state
+    driveState.pendingSync = false;
+    driveState.syncFailCount = 0;
+    localStorage.removeItem('spending_unsynced');
+    hideWarning();
+    updateLastSyncTime();
+    if (triggeredBy !== 'silent') showToast('ซิงค์กับ Drive เรียบร้อย ✓');
+    setPillSyncing(false);
+    return true;
+  } catch(e) {
+    console.error('Drive sync error:', e);
+    driveState.pendingSync = true;
+    driveState.syncFailCount = (driveState.syncFailCount || 0) + 1;
+    localStorage.setItem('spending_unsynced', '1');
+    const errMsg = (e && e.message) ? e.message : String(e);
+    const detail = errMsg.includes('401')
+      ? 'Token หมดอายุ — กรุณาเชื่อมต่อ Drive ใหม่อีกครั้ง'
+      : `ซิงค์ไม่สำเร็จ (${driveState.syncFailCount} ครั้ง) — ข้อมูลบันทึกใน browser แล้ว แต่ยังไม่ได้ซิงค์ Drive`;
+    markUnsynced(detail);
+    if (triggeredBy !== 'silent') showToast('Drive sync ไม่สำเร็จ — ข้อมูลอยู่ใน browser', true);
+    setPillSyncing(false);
+    scheduleRetry();
+    return false;
+  }
+}
+
+function updateLastSyncTime() {
+  const now = new Date();
+  const str = now.toLocaleDateString('th-TH', {day:'2-digit',month:'short',year:'numeric'}) + ' ' +
+              now.toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit'});
+  localStorage.setItem('last_sync_time', str);
+  const el = document.getElementById('last-sync-time');
+  if (el) el.textContent = `ซิงค์ล่าสุด: ${str}`;
+}
+
+async function showBackupList() {
+  const panel = document.getElementById('backup-panel');
+  const content = document.getElementById('backup-list-content');
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  if (panel.style.display === 'none') return;
+  content.innerHTML = '<span style="color:var(--text2)">กำลังโหลด...</span>';
+  try {
+    const backupFolderId = await getOrCreateBackupFolder(await getOrCreateFolder());
+    const res = await gapi.client.drive.files.list({
+      q: `'${backupFolderId}' in parents and trashed=false`,
+      fields: 'files(id,name,createdTime,size)',
+      orderBy: 'createdTime desc',
+      pageSize: MAX_BACKUPS
+    });
+    const files = res.result.files || [];
+    if (!files.length) { content.innerHTML = '<span style="color:var(--text2)">ยังไม่มีไฟล์ backup</span>'; return; }
+    content.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${files.map((f,i) => {
+          const dt = new Date(f.createdTime);
+          const dtStr = dt.toLocaleDateString('th-TH',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+          const kb = f.size ? (parseInt(f.size)/1024).toFixed(1)+'KB' : '';
+          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface2);border-radius:var(--radius);${i===0?'border:1px solid #1D9E7544':''}">
+            <div>
+              ${i===0?'<span style="font-size:10px;background:#1D9E7522;color:#0F6E56;padding:2px 7px;border-radius:99px;font-weight:600;margin-right:6px">ล่าสุด</span>':''}
+              <span style="font-weight:500">${dtStr}</span>
+              ${kb?`<span style="margin-left:8px;font-size:11px;color:var(--text2)">${kb}</span>`:''}
+            </div>
+            <i class="ti ti-lock" style="font-size:14px;color:var(--text2)" title="Read-only backup"></i>
+          </div>`;
+        }).join('')}
+      </div>
+      <p style="font-size:11px;color:var(--text2);margin-top:8px"><i class="ti ti-info-circle" style="font-size:12px;margin-right:3px"></i>ไฟล์เหล่านี้เป็น snapshot ที่ไม่มีการเขียนทับ — เปิดดูใน Google Drive ได้ที่โฟลเดอร์ <strong>${DB_FOLDER_NAME}/${BACKUP_FOLDER_NAME}</strong></p>`;
+  } catch(e) {
+    content.innerHTML = '<span style="color:var(--red)">โหลดรายการ backup ไม่สำเร็จ</span>';
+  }
+}
+
+function scheduleRetry() {
+  if (driveState.retryTimer) clearTimeout(driveState.retryTimer);
+  const delay = Math.min(30000 * Math.pow(2, (driveState.syncFailCount || 1) - 1), 300000); // max 5 min
+  driveState.retryTimer = setTimeout(() => {
+    if (driveState.pendingSync && driveState.signedIn) {
+      syncToDrive('silent');
+    }
+  }, delay);
+}
+
+function markUnsynced(detail) {
+  driveState.pendingSync = true;
+  localStorage.setItem('spending_unsynced', '1');
+  document.getElementById('sync-warn-detail').textContent = detail;
+  document.getElementById('sync-warning').classList.add('show');
+  // update pill
+  const pill = document.getElementById('drive-pill');
+  const pillText = document.getElementById('drive-pill-text');
+  if (!driveState.signedIn) {
+    pill.className = 'drive-pill disconnected';
+    pillText.textContent = '⚠ ยังไม่ได้ซิงค์';
+  } else {
+    pill.className = 'drive-pill disconnected';
+    pillText.innerHTML = '<span style="color:#BA7517">⚠ ซิงค์ไม่สำเร็จ</span>';
+  }
+}
+
+function hideWarning() {
+  document.getElementById('sync-warning').classList.remove('show');
+}
+function dismissWarning() {
+  hideWarning();
+}
+function retrySyncNow() {
+  if (driveState.retryTimer) clearTimeout(driveState.retryTimer);
+  if (!driveState.signedIn) { toggleDriveAuth(); return; }
+  syncToDrive('manual');
+}
+
+/* ── save: bump version, record who saved, then sync ── */
+async function save() {
+  data._version = (data._version||0) + 1;
+  data._lastUpdatedAt = new Date().toISOString();
+  data._lastUpdatedBy = driveState.currentUser ? driveState.currentUser.name : 'Unknown';
+  data._lastUpdatedAvatar = driveState.currentUser ? (driveState.currentUser.avatar||'') : '';
+  saveLocal();
+  updateLastUpdatedBar();
+  const ok = await syncToDrive('auto');
+}
+
+async function loadFromDrive() {
+  if (!driveState.signedIn) return;
+  setPillSyncing(true);
+  try {
+    const folderId = await getOrCreateFolder();
+    const res = await gapi.client.drive.files.list({
+      q: `name='${DB_FILENAME}' and '${folderId}' in parents and trashed=false`,
+      fields: 'files(id,modifiedTime)'
+    });
+    if (!res.result.files.length) { setPillSyncing(false); return; }
+    driveState.fileId = res.result.files[0].id;
+    const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${driveState.fileId}?alt=media`, {
+      headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}` }
+    });
+    const remoteData = await dl.json();
+    // merge: prefer whichever has more entries
+    if (remoteData && remoteData.entries) {
+      const localCount = data.entries.length;
+      const remoteCount = remoteData.entries.length;
+      if (remoteCount >= localCount) {
+        data = remoteData;
+        data.categories = (data.categories || []).map(c => c === 'บ้านเค้ก' ? 'Bakelab' : c);
+        data.entries = (data.entries || []).map(e => e.category === 'บ้านเค้ก' ? {...e, category:'Bakelab'} : e);
+        saveLocal();
+        populateCategorySelect();
+        showToast('โหลดข้อมูลจาก Drive แล้ว ✓');
+      }
+    }
+  } catch(e) { console.error('Drive load error:', e); }
+  setPillSyncing(false);
+}
+
+function setPillSyncing(on) {
+  const pill = document.getElementById('drive-pill');
+  const pillText = document.getElementById('drive-pill-text');
+  if (on) { pill.className = 'drive-pill syncing'; pillText.textContent = 'Drive: กำลังซิงค์...'; }
+  else { updateDriveUI(driveState.signedIn); }
+}
+
+
+
+/* ═══════════════════════════════════════════
+   HELPERS
+   ═══════════════════════════════════════════ */
+function catColor(n) { let h=0; for(let c of n){h=(h*31+c.charCodeAt(0))%PALETTE.length;} return PALETTE[h]; }
+function fmtBaht(n) { return '฿'+n.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtBahtShort(n) { return '฿'+n.toLocaleString('th-TH',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+function fmtDT(s) {
+  const d=new Date(s);
+  return d.toLocaleDateString('th-TH',{day:'2-digit',month:'short',year:'numeric'});
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ═══════════════════════════════════════════
+   TABS
+   ═══════════════════════════════════════════ */
+function switchTab(name) {
+  ['add','slip','records','categories','export'].forEach((t,i)=>{
+    document.getElementById('tab-'+t).style.display = t===name?'':'none';
+    document.querySelectorAll('.tab')[i].classList.toggle('active', t===name);
+  });
+  if(name==='add'){ document.getElementById('form-section').style.display=''; document.getElementById('confirm-section').style.display='none'; }
+  if(name==='slip') initSlipTab();
+  if(name==='records'){ renderRecords(); populateRecordCatFilter(); }
+  if(name==='categories') renderCategories();
+  if(name==='export') renderExport();
+}
+
+/* ═══════════════════════════════════════════
+   FORM
+   ═══════════════════════════════════════════ */
+function populateCategorySelect() {
+  const el = document.getElementById('f-category-checks');
+  if (!el) return;
+  const current = getSelectedCategory();
+  el.innerHTML = data.categories.map((c,i) => {
+    const id = 'fcat_'+i;
+    const checked = (current ? current===c : i===0) ? 'checked' : '';
+    return `<input type="radio" class="dept-checkbox-item" name="f-category-radio" id="${id}" value="${esc(c)}" ${checked}>
+            <label class="dept-checkbox-label" for="${id}">${esc(c)}</label>`;
+  }).join('');
+}
+function getSelectedCategory() {
+  const el = document.querySelector('input[name="f-category-radio"]:checked');
+  return el ? el.value : (data.categories[0]||'');
+}
+function populateRecordCatFilter() {
+  const sel=document.getElementById('rec-cat'); const cur=sel.value;
+  sel.innerHTML='<option value="">ทุกแผนก</option>'+data.categories.map(c=>`<option>${esc(c)}</option>`).join('');
+  sel.value=cur;
+}
+function setDefaultDT() {
+  const now=new Date();
+  document.getElementById('f-datetime').value = now.toISOString().slice(0,10);
+}
+function hideDrop() { document.getElementById('co-drop').style.display='none'; }
+function onCompanyInput() {
+  const val=document.getElementById('f-company').value.trim().toLowerCase();
+  const drop=document.getElementById('co-drop');
+  if(!val){drop.style.display='none';return;}
+  const m=data.companies.filter(c=>c.toLowerCase().includes(val));
+  if(!m.length){drop.style.display='none';return;}
+  drop.innerHTML=m.map(c=>`<div class="dropdown-item" onmousedown="pickCompany('${c.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">
+    <i class="ti ti-building" style="font-size:14px;color:var(--text2)"></i>${esc(c)}</div>`).join('');
+  drop.style.display='block';
+}
+function pickCompany(n){ document.getElementById('f-company').value=n; hideDrop(); }
+function clearForm(){
+  ['f-amount','f-transfer','f-company','f-details','f-expense-cat'].forEach(id=>document.getElementById(id).value='');
+  setDefaultDT();
+}
+
+/* ═══════════════════════════════════════════
+   PREVIEW / CONFIRM
+   ═══════════════════════════════════════════ */
+function previewEntry() {
+  const dt=document.getElementById('f-datetime').value;
+  const amount=parseFloat(document.getElementById('f-amount').value);
+  const transfer=document.getElementById('f-transfer').value.trim();
+  const company=document.getElementById('f-company').value.trim();
+  const category=getSelectedCategory();
+  const details=document.getElementById('f-details').value.trim();
+  if(!dt){alert('กรุณาเลือกวันที่และเวลา');return;}
+  if(isNaN(amount)||amount<=0){alert('กรุณากรอกจำนวนเงินให้ถูกต้อง');return;}
+  if(!category){alert('กรุณาเลือกแผนก');return;}
+  pendingEntry={id:Date.now(),dt,amount,transfer,company,category,details,expenseCat:document.getElementById('f-expense-cat').value};
+  const color=catColor(category);
+  const rows=[
+    {label:'วันที่',v:fmtDT(dt),icon:'ti-calendar'},
+    {label:'จ่ายให้',v:transfer||'—',icon:'ti-user'},
+    {label:'บริษัท / ร้านค้า',v:company||'—',icon:'ti-building'},
+    {label:'แผนก',v:`<span class="badge" style="background:${color}22;color:${color}">${esc(category)}</span>`,icon:'ti-tag',html:true},
+    {label:'รายละเอียด',v:details||'—',icon:'ti-notes'},
+    {label:'ประเภทค่าใช้จ่าย',v:document.getElementById('f-expense-cat').value||'—',icon:'ti-briefcase'},
+    {label:'จำนวนเงิน',v:fmtBaht(amount),icon:'ti-currency-baht',big:true,amt:true},
+  ];
+  document.getElementById('confirm-rows').innerHTML=rows.map(r=>`
+    <div class="confirm-row${r.amt?' amount-row':''}">
+      <div class="confirm-label"><i class="ti ${r.icon}" style="font-size:13px"></i>${r.label}</div>
+      <div class="confirm-value${r.big?' big':''}">${r.html?r.v:esc(r.v)}</div>
+    </div>`).join('');
+  document.getElementById('form-section').style.display='none';
+  document.getElementById('confirm-section').style.display='';
+}
+function backToForm(){ document.getElementById('confirm-section').style.display='none'; document.getElementById('form-section').style.display=''; }
+function confirmEntry(){
+  if(!pendingEntry) return;
+  pendingEntry.createdBy  = driveState.currentUser ? driveState.currentUser.name : 'Unknown';
+  pendingEntry.createdAt  = new Date().toISOString();
+  data.entries.unshift(pendingEntry);
+  if(pendingEntry.company&&!data.companies.includes(pendingEntry.company)) data.companies.push(pendingEntry.company);
+
+  save();
+  pendingEntry=null;
+  document.getElementById('confirm-section').style.display='none';
+  document.getElementById('form-section').style.display='';
+  clearForm();
+  showToast('บันทึกรายการเรียบร้อยแล้ว ✓');
+}
+
+/* ═══════════════════════════════════════════
+   RECORDS
+   ═══════════════════════════════════════════ */
+let showDeleted = false;
+function deleteEntry(id){
+  if(!confirm('ต้องการลบรายการนี้ใช่หรือไม่?\n\nรายการจะถูกซ่อนแต่ยังเก็บไว้ใน database')) return;
+  const e=data.entries.find(x=>x.id==id); if(!e) return;
+  e.deleted=true;
+  e.deletedBy=driveState.currentUser?driveState.currentUser.name:'Unknown';
+  e.deletedAt=new Date().toISOString();
+  save(); renderRecords();
+  if(document.getElementById('tab-export').style.display!=='none') renderExport();
+}
+function toggleShowDeleted(){
+  showDeleted=!showDeleted;
+  const btn=document.getElementById('deleted-toggle-btn');
+  if(btn) btn.textContent=showDeleted?'ซ่อนรายการที่ลบ':'แสดงรายการที่ลบ';
+  renderRecords();
+}
+function renderRecords(){
+  const search=(document.getElementById('rec-search').value||'').toLowerCase();
+  const cat=document.getElementById('rec-cat').value;
+  const from=document.getElementById('rec-from').value;
+  const to=document.getElementById('rec-to').value;
+  let f=data.entries.filter(e=>{
+    if(!showDeleted && e.deleted) return false;
+    if(cat&&e.category!==cat) return false;
+    if(from&&e.dt.slice(0,10)<from) return false;
+    if(to&&e.dt.slice(0,10)>to) return false;
+    if(search&&!JSON.stringify(e).toLowerCase().includes(search)) return false;
+    return true;
+  });
+  const tbody=document.getElementById('records-body');
+  if(!f.length){
+    tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><i class="ti ti-inbox" style="font-size:30px;display:block;margin-bottom:10px"></i>ไม่พบรายการ</div></td></tr>`;
+    document.getElementById('rec-total').textContent=''; return;
+  }
+  tbody.innerHTML=f.map(e=>{
+    const color=catColor(e.category);
+    return `<tr>
+      <td style="font-size:12px">${fmtDT(e.dt)}</td>
+      <td>${esc(e.transfer||'—')}</td>
+      <td>${esc(e.company||'—')}</td>
+      <td><span class="badge" style="background:${color}22;color:${color}">${esc(e.category)}</span></td>
+      <td style="font-size:12px;color:var(--text2);max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.details||'—')}</td>
+      <td style="font-size:11px;color:var(--text2)">${esc(e.expenseCat||'—')}</td>
+      <td class="amount-cell" style="text-align:right">${fmtBaht(e.amount)}</td>
+      <td>${e.deleted
+        ? `<span class="deleted-badge"><i class="ti ti-trash" style="font-size:10px"></i> ลบแล้ว</span>`
+        : `<button class="del-row" onclick="deleteEntry(${e.id})" title="ลบ"><i class="ti ti-trash"></i></button>`
+      }</td>
+    </tr>`;
+  }).join('');
+  const total=f.reduce((s,e)=>s+e.amount,0);
+  document.getElementById('rec-total').innerHTML=`<strong>${f.length} รายการ</strong> &nbsp;|&nbsp; ยอดรวม: <strong>${fmtBaht(total)}</strong>`;
+}
+
+/* ═══════════════════════════════════════════
+   CATEGORIES
+   ═══════════════════════════════════════════ */
+function renderCategories(){
+  const used=new Set(data.entries.map(e=>e.category));
+  document.getElementById('cat-list').innerHTML=data.categories.length?data.categories.map(c=>{
+    const color=catColor(c); const inUse=used.has(c);
+    return `<div class="cat-item">
+      <div class="cat-name"><span class="cat-dot" style="background:${color}"></span>${esc(c)}</div>
+      <div>${!inUse
+        ?`<button class="btn btn-danger btn-sm" onclick="deleteCategory('${c.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')"><i class="ti ti-trash"></i> ลบ</button>`
+        :'<span style="font-size:11px;color:var(--text2)">มีรายการอยู่</span>'}</div>
+    </div>`;
+  }).join(''):'<p style="font-size:13px;color:var(--text2)">ยังไม่มีแผนก</p>';
+}
+function addCategory(){
+  const inp=document.getElementById('new-cat'); const name=inp.value.trim();
+  if(!name) return;
+  if(data.categories.includes(name)){alert('มีแผนกนี้อยู่แล้ว');return;}
+  data.categories.push(name); save(); inp.value='';
+  renderCategories(); populateCategorySelect();
+}
+function deleteCategory(name){
+  if(!confirm(`ต้องการลบแผนก "${name}" ใช่หรือไม่?`)) return;
+  data.categories=data.categories.filter(c=>c!==name);
+  save(); renderCategories(); populateCategorySelect();
+}
+
+/* ═══════════════════════════════════════════
+   EXPORT
+   ═══════════════════════════════════════════ */
+function renderExport(){
+  const total=data.entries.reduce((s,e)=>s+e.amount,0);
+  let html=`<div class="metric"><div class="metric-label">ยอดรวมทั้งหมด</div><div class="metric-value">${fmtBahtShort(total)}</div></div>`;
+  html+=`<div class="metric"><div class="metric-label">จำนวนรายการ</div><div class="metric-value">${data.entries.length} รายการ</div></div>`;
+  data.categories.forEach(c=>{
+    const v=data.entries.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0);
+    html+=`<div class="metric"><div class="metric-label">${esc(c)}</div><div class="metric-value">${fmtBahtShort(v)}</div></div>`;
+  });
+  document.getElementById('summary-grid').innerHTML=html;
+  updateDriveUI(driveState.signedIn);
+}
+/* ── Pure-JS Excel export (no external library needed) ──
+   Generates a real .xlsx file using the SpreadsheetML XML format
+   packed into a zip-like structure via base64. Works offline,
+   no CDN dependency, no Thai-encoding bugs.
+*/
+function exportExcel(){
+  if(!data.entries.length){alert('ยังไม่มีรายการให้ส่งออก');return;}
+  try {
+    const sheets = [];
+
+    // Sheet 1: ยอดรวมทั้งหมด
+    const hdr = ['วันที่','จ่ายให้','บริษัท / ร้านค้า','แผนก','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)'];
+    const allRows = [
+      hdr,
+      ...data.entries.map(e=>[
+        e.dt ? e.dt.slice(0,10) : '',
+        e.transfer || '',
+        e.company || '',
+        e.category || '',
+        e.details || '',
+        e.expenseCat||'',
+        parseFloat(e.amount)||0
+      ]),
+      ['','','','','ยอดรวมทั้งหมด', data.entries.reduce((s,e)=>s+(parseFloat(e.amount)||0),0)]
+    ];
+    sheets.push({ name:'ยอดรวมทั้งหมด', rows: allRows });
+
+    // Per-category sheets — use actual category name
+    data.categories.forEach((cat) => {
+      const rows = data.entries.filter(e=>e.category===cat);
+      if(!rows.length) return;
+      const catRows = [
+        hdr,
+        ...rows.map(e=>[
+          e.dt ? e.dt.slice(0,10) : '',
+          e.transfer||'', e.company||'', e.category||'', e.details||'',
+          parseFloat(e.amount)||0
+        ]),
+        ['','','','','ยอดรวม', rows.reduce((s,e)=>s+(parseFloat(e.amount)||0),0)]
+      ];
+      sheets.push({ name: cat, rows: catRows });
+    });
+
+    // Build xlsx using SpreadsheetML + JSZip-like manual zip
+    const xlsx = buildXlsx(sheets);
+    const blob = new Blob([xlsx], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'spending_' + new Date().toISOString().slice(0,10) + '.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ try{URL.revokeObjectURL(url);a.remove();}catch(x){} }, 1500);
+    showToast('ดาวน์โหลด Excel เรียบร้อย ✓');
+  } catch(err) {
+    console.error('Export error:', err);
+    // Fallback to CSV if xlsx build fails
+    exportCSV();
+  }
+}
+
+function exportCSV(){
+  // Ultimate fallback: plain CSV, always works
+  const hdr = ['วันที่','จ่ายให้','บริษัท / ร้านค้า','แผนก','รายละเอียด','จำนวนเงิน (฿)'];
+  const csvRows = [hdr, ...data.entries.map(e=>[
+    e.dt ? e.dt.slice(0,10) : '',
+    e.transfer||'', e.company||'', e.category||'', e.details||'',
+    parseFloat(e.amount)||0
+  ])];
+  const csv = '\uFEFF' + csvRows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'spending_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ try{URL.revokeObjectURL(url);a.remove();}catch(x){} }, 1500);
+  showToast('ดาวน์โหลดเป็น CSV แทน (xlsx ไม่พร้อม)');
+}
+
+/* Build a real .xlsx (OOXML) without any library */
+function buildXlsx(sheets) {
+  function xmlEsc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  // Shared strings table
+  const strMap = {}, strs = [];
+  function si(v){
+    const k = String(v);
+    if(k in strMap) return strMap[k];
+    strMap[k] = strs.length;
+    strs.push(k);
+    return strs.length-1;
+  }
+
+  // Build sheet XML
+  const sheetXmls = sheets.map(({rows})=>{
+    let xml = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+    rows.forEach((row, ri)=>{
+      xml += `<row r="${ri+1}">`;
+      row.forEach((cell, ci)=>{
+        const col = colName(ci);
+        const addr = col+(ri+1);
+        if(typeof cell === 'number'){
+          xml += `<c r="${addr}"><v>${cell}</v></c>`;
+        } else {
+          const idx = si(cell);
+          xml += `<c r="${addr}" t="s"><v>${idx}</v></c>`;
+        }
+      });
+      xml += '</row>';
+    });
+    xml += '</sheetData></worksheet>';
+    return xml;
+  });
+
+  // Shared strings XML
+  const ssXml = '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'+strs.length+'" uniqueCount="'+strs.length+'">'
+    + strs.map(s=>'<si><t xml:space="preserve">'+xmlEsc(s)+'</t></si>').join('') + '</sst>';
+
+  // Workbook XML
+  const wbXml = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+    + sheets.map((s,i)=>`<sheet name="${xmlEsc(s.name)}" sheetId="${i+1}" r:id="rId${i+2}"/>`).join('')+'</sheets></workbook>';
+
+  // Relationships
+  const wbRels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
+    + sheets.map((_,i)=>`<Relationship Id="rId${i+2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')
+    + '</Relationships>';
+
+  const rootRels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+
+  const contentTypes = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    +'<Default Extension="xml" ContentType="application/xml"/>'
+    +'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    +'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+    + sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')
+    +'</Types>';
+
+  // Zip it
+  const files = [
+    ['[Content_Types].xml', contentTypes],
+    ['_rels/.rels', rootRels],
+    ['xl/workbook.xml', wbXml],
+    ['xl/_rels/workbook.xml.rels', wbRels],
+    ['xl/sharedStrings.xml', ssXml],
+    ...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml', xml])
+  ];
+  return zipFiles(files);
+}
+
+function colName(n){ let s=''; n++; while(n>0){s=String.fromCharCode(64+(n%26||26))+s; n=Math.floor((n-1)/26);} return s; }
+
+/* Minimal ZIP builder (DEFLATE-store, no compression needed for xlsx) */
+function zipFiles(files){
+  const enc = new TextEncoder();
+  const parts = [];
+  const centralDir = [];
+  let offset = 0;
+
+  files.forEach(([name, content])=>{
+    const nameBytes = enc.encode(name);
+    const dataBytes = typeof content === 'string' ? enc.encode(content) : content;
+    const crc = crc32(dataBytes);
+    const local = new Uint8Array(30 + nameBytes.length + dataBytes.length);
+    const dv = new DataView(local.buffer);
+    dv.setUint32(0, 0x04034b50, true); // local file header sig
+    dv.setUint16(4, 20, true);  // version needed
+    dv.setUint16(6, 0, true);   // flags
+    dv.setUint16(8, 0, true);   // compression: store
+    dv.setUint16(10, 0, true);  // mod time
+    dv.setUint16(12, 0, true);  // mod date
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, dataBytes.length, true);
+    dv.setUint32(22, dataBytes.length, true);
+    dv.setUint16(26, nameBytes.length, true);
+    dv.setUint16(28, 0, true);
+    local.set(nameBytes, 30);
+    local.set(dataBytes, 30 + nameBytes.length);
+
+    const cd = new Uint8Array(46 + nameBytes.length);
+    const cdv = new DataView(cd.buffer);
+    cdv.setUint32(0, 0x02014b50, true);
+    cdv.setUint16(4, 20, true); cdv.setUint16(6, 20, true);
+    cdv.setUint16(8, 0, true); cdv.setUint16(10, 0, true);
+    cdv.setUint16(12, 0, true); cdv.setUint16(14, 0, true);
+    cdv.setUint32(16, crc, true);
+    cdv.setUint32(20, dataBytes.length, true);
+    cdv.setUint32(24, dataBytes.length, true);
+    cdv.setUint16(28, nameBytes.length, true);
+    cdv.setUint16(30, 0, true); cdv.setUint16(32, 0, true);
+    cdv.setUint16(34, 0, true); cdv.setUint16(36, 0, true);
+    cdv.setUint32(38, 0, true);
+    cdv.setUint32(42, offset, true);
+    cd.set(nameBytes, 46);
+
+    parts.push(local);
+    centralDir.push(cd);
+    offset += local.length;
+  });
+
+  const cdBytes = concat(centralDir);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true); ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdBytes.length, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  return concat([...parts, cdBytes, eocd]);
+}
+
+function concat(arrays){
+  const total = arrays.reduce((s,a)=>s+a.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  arrays.forEach(a=>{ out.set(a, off); off+=a.length; });
+  return out;
+}
+
+function crc32(buf){
+  let c = 0xFFFFFFFF;
+  const t = crc32.table || (()=>{
+    crc32.table = new Uint32Array(256);
+    for(let i=0;i<256;i++){ let v=i; for(let j=0;j<8;j++) v=v&1?(0xEDB88320^(v>>>1)):v>>>1; crc32.table[i]=v; }
+    return crc32.table;
+  })();
+  for(let i=0;i<buf.length;i++) c=t[(c^buf[i])&0xFF]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+
+/* ═══════════════════════════════════════════
+   TOAST
+   ═══════════════════════════════════════════ */
+function showToast(msg, isErr=false){
+  const t=document.getElementById('toast');
+  t.innerHTML=`<i class="ti ${isErr?'ti-alert-circle':'ti-circle-check'}" style="font-size:16px"></i>${msg}`;
+  t.style.background=isErr?'#a32d2d':'#1D9E75';
+  t.style.opacity='1';
+  setTimeout(()=>t.style.opacity='0',2200);
+}
+
+/* ═══════════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════════ */
+function init(){
+  loadLocal(); setDefaultDT(); populateCategorySelect(); updateDriveUI(false);
+  // restore last backup time
+  const lbt = localStorage.getItem('last_backup_time');
+  if (lbt) driveState.lastBackupTime = parseInt(lbt);
+  // restore user from localStorage
+  const savedUser = localStorage.getItem('spending_user');
+  if (savedUser) {
+    try {
+      driveState.currentUser = JSON.parse(savedUser);
+      const pill=document.getElementById('user-pill');
+      const avatar=document.getElementById('user-avatar');
+      const nameEl=document.getElementById('user-name-short');
+      if(pill) pill.style.display='inline-flex';
+      if(avatar&&driveState.currentUser.avatar) avatar.src=driveState.currentUser.avatar;
+      const firstName=(driveState.currentUser.name||'').split(' ')[0];
+      if(nameEl) nameEl.textContent=firstName;
+    } catch(e){}
+  }
+  // unsynced check
+  if (localStorage.getItem('spending_unsynced') === '1') {
+    driveState.pendingSync = true;
+    markUnsynced('มีข้อมูลที่ยังไม่ได้ซิงค์จากครั้งก่อน — กรุณาเชื่อมต่อ Drive เพื่อบันทึก');
+  }
+  updateLastUpdatedBar();
+  initOfflineDetection();
+  initPin();
+}
+init();
+
+/* ═════════════════════════════════════════════
+   SLIP SCANNER — OCR only (Tesseract.js)
+   ═════════════════════════════════════════════ */
+let slips = [];
+let ocrWorker = null;
+
+function initSlipTab() {
+  const el = document.getElementById('ocr-engine-status');
+  if (!window.Tesseract) {
+    if (el) el.textContent = '⚠ โหลด OCR engine ไม่สำเร็จ (ต้องการ internet ครั้งแรก)';
+    return;
+  }
+  if (el) el.innerHTML = '<span class="spinner" style="margin-right:4px"></span> กำลังโหลด OCR engine...';
+  initOcrWorker().then(() => {
+    if (el) el.innerHTML = '<i class="ti ti-circle-check" style="color:var(--green);margin-right:4px"></i>OCR พร้อมใช้งาน';
+  }).catch(() => {
+    if (el) el.textContent = '⚠ โหลด OCR ไม่สำเร็จ';
+  });
+}
+
+async function initOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  ocrWorker = await Tesseract.createWorker(['eng', 'tha'], 1, { logger: () => {} });
+  return ocrWorker;
+}
+
+function handleSlipFiles(files) {
+  if (!window.Tesseract) { alert('OCR engine ยังโหลดไม่สำเร็จ — กรุณาตรวจสอบ internet แล้วลองใหม่'); return; }
+  Array.from(files).forEach(file => {
+    if (!file.type.startsWith('image/')) return;
+    const id = Date.now() + '_' + Math.floor(Math.random()*99999);
+    const slip = { id, file, dataUrl: null, status: 'loading',
+      date: new Date().toISOString().slice(0,10),
+      transfer:'', company:'', amount:'', details:'',
+      category: data.categories[0]||'', rawText:'' };
+    slips.push(slip);
+    const reader = new FileReader();
+    reader.onload = e => {
+      slip.dataUrl = e.target.result;
+      renderSlipCard(slip);
+      readSlipWithOCR(slip);
+    };
+    reader.readAsDataURL(file);
+  });
+  renderAllSlips();
+}
+
+async function readSlipWithOCR(slip) {
+  updateSlipStatus(slip.id, 'reading');
+  try {
+    const worker = await initOcrWorker();
+    const { data: { text } } = await worker.recognize(slip.dataUrl);
+    slip.rawText = text;
+    parseSlipText(slip, text);
+    slip.status = 'done';
+  } catch(e) {
+    console.error('OCR error:', e);
+    slip.status = 'error';
+    slip.errorMsg = e.message || 'OCR ล้มเหลว';
+  }
+  renderSlipCard(slip);
+  updateConfirmBar();
+}
+
+function parseSlipText(slip, raw) {
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  const full  = raw.replace(/\n/g, ' ');
+
+  const engMonths = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  const thaiMonths = {'\u0e21.\u0e04.':1,'\u0e01.\u0e1e.':2,'\u0e21\u0e35.\u0e04.':3,'\u0e40\u0e21.\u0e22.':4,'\u0e1e.\u0e04.':5,'\u0e21\u0e34.\u0e22.':6,'\u0e01.\u0e04.':7,'\u0e2a.\u0e04.':8,'\u0e01.\u0e22.':9,'\u0e15.\u0e04.':10,'\u0e1e.\u0e22.':11,'\u0e18.\u0e04.':12};
+
+  function parseEngDate(d,mon,y){
+    const mo=engMonths[mon.toLowerCase().slice(0,3)]; if(!mo) return null;
+    let yr=parseInt(y); if(yr>2400)yr-=543;
+    return `${yr}-${String(mo).padStart(2,'0')}-${d.padStart(2,'0')}`;
+  }
+  function lineAfter(kw){
+    for(let i=0;i<lines.length;i++){
+      if(kw.test(lines[i])){
+        const rem=lines[i].replace(kw,'').trim();
+        return rem.length>1 ? rem : (lines[i+1]||'');
+      }
+    }
+    return '';
+  }
+
+  /* detect bank */
+  const isSCB = /scb|siam commercial/i.test(full);
+
+  if (isSCB) {
+    /* === SCB format ===
+       14 May 2026 - 21:19
+       FROM  ... MISTER MONTREE M.
+       TO    METROPOLITAN WATERWORKS A
+       AMOUNT   3,291.23
+       NOTE  ค่าน้ำบางแค may26
+    */
+    // DATE: "14 May 2026"
+    let m = full.match(/(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})/i);
+    if (m) slip.date = parseEngDate(m[1], m[2], m[3]) || slip.date;
+
+    // TO: standalone "TO" keyword -> next non-empty line
+    for (let i=0; i<lines.length; i++) {
+      if (/^TO$/i.test(lines[i])) {
+        for (let j=i+1; j<Math.min(i+4,lines.length); j++) {
+          const c = lines[j].replace(/^[^A-Za-z\u0e00-\u0e7f]+/,'').trim();
+          if (c.length > 2 && !/^(biller|customer|xxx|a\/c)/i.test(c)) {
+            slip.transfer = c; slip.company = c; break;
+          }
+        }
+        if (slip.transfer) break;
+      }
+    }
+
+    // AMOUNT: standalone "AMOUNT" line -> next number, or inline "AMOUNT 3,291.23"
+    for (let i=0; i<lines.length; i++) {
+      if (/^AMOUNT$/i.test(lines[i])) {
+        for (let j=i+1; j<Math.min(i+3,lines.length); j++) {
+          const m2=lines[j].match(/^([\d,]+\.\d{2})$/);
+          if (m2){ slip.amount=m2[1].replace(/,/g,''); break; }
+        }
+        if (slip.amount) break;
+      }
+      // "AMOUNT   3,291.23" on same line (OCR merges)
+      const same=lines[i].match(/^AMOUNT\s+([\d,]+\.\d{2})/i);
+      if (same){ slip.amount=same[1].replace(/,/g,''); break; }
+    }
+    // fallback: largest decimal
+    if (!slip.amount) {
+      const vals=(full.match(/[\d,]+\.\d{2}/g)||[])
+        .map(n=>parseFloat(n.replace(/,/g,''))).filter(v=>v>0&&v<10000000);
+      if (vals.length) slip.amount=String(Math.max(...vals));
+    }
+
+    // NOTE
+    const note=lineAfter(/^NOTE\s*:?\s*/i);
+    if (note) slip.details=note;
+
+    return;
+  }
+
+  /* === GENERIC parser (KBank, KTB, BBL, TTB, others) === */
+  let dateFound=false, m;
+
+  // "DD Month YYYY"
+  m=full.match(/(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})/i);
+  if (m){ slip.date=parseEngDate(m[1],m[2],m[3])||slip.date; dateFound=true; }
+
+  // YYYY-MM-DD
+  if (!dateFound){ m=full.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/); if(m){ let yr=parseInt(m[1]); if(yr>2400)yr-=543; slip.date=`${yr}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`; dateFound=true; } }
+
+  // DD/MM/YYYY
+  if (!dateFound){ m=full.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); if(m){ let yr=parseInt(m[3]); if(yr>2400)yr-=543; slip.date=`${yr}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; dateFound=true; } }
+
+  // Thai month
+  if (!dateFound){
+    for (const [th,mo] of Object.entries(thaiMonths)){
+      const re=new RegExp(`(\\d{1,2})\\s*${th.replace(/\./g,'\\.')}\\s*(\\d{4})`);
+      m=full.match(re); if(m){ let yr=parseInt(m[2]); if(yr>2400)yr-=543; slip.date=`${yr}-${String(mo).padStart(2,'0')}-${m[1].padStart(2,'0')}`; dateFound=true; break; }
+    }
+  }
+
+  // AMOUNT
+  let amount=0;
+  for (let i=0;i<lines.length;i++){
+    if (/^(amount|\u0e08\u0e33\u0e19\u0e27\u0e19\u0e40\u0e07\u0e34\u0e19|\u0e22\u0e2d\u0e14\u0e40\u0e07\u0e34\u0e19|\u0e22\u0e2d\u0e14\u0e42\u0e2d\u0e19)/i.test(lines[i])){
+      const combined=(lines[i]+' '+(lines[i+1]||'')).replace(/,/g,'');
+      const m2=combined.match(/(\d+\.\d{2})/); if(m2){ amount=parseFloat(m2[1]); break; }
+    }
+    const amtSame=lines[i].match(/^(?:amount|\u0e08\u0e33\u0e19\u0e27\u0e19\u0e40\u0e07\u0e34\u0e19|\u0e22\u0e2d\u0e14\u0e40\u0e07\u0e34\u0e19)[^\d]*([\d,]+\.\d{2})/i);
+    if(amtSame){ amount=parseFloat(amtSame[1].replace(/,/g,'')); break; }
+  }
+  if (!amount){
+    const vals=(full.match(/[\d,]+\.\d{2}/g)||[]).map(n=>parseFloat(n.replace(/,/g,''))).filter(v=>v>0&&v<10000000);
+    if(vals.length) amount=Math.max(...vals);
+  }
+  if (amount) slip.amount=String(amount);
+
+  // TO name
+  const toVal=lineAfter(/^(to|\u0e16\u0e36\u0e07|\u0e1c\u0e39\u0e49\u0e23\u0e31\u0e1a|\u0e42\u0e2d\u0e19\u0e44\u0e1b\u0e22\u0e31\u0e07)\s*/i);
+  if (toVal.length>2){ slip.transfer=toVal; slip.company=toVal; }
+  if (!slip.transfer){ m=full.match(/(?:TO|\u0e16\u0e36\u0e07)\s+([A-Z\u0e00-\u0e7f][A-Z\u0e00-\u0e7f\s]{3,})/i); if(m){ slip.transfer=m[1].trim(); slip.company=slip.transfer; } }
+
+  // NOTE
+  const note2=lineAfter(/^(note|memo|\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38|\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14)\s*:?\s*/i);
+  if (note2) slip.details=note2;
+}
+
+function renderAllSlips() {
+  document.getElementById('slip-grid').innerHTML = '';
+  slips.forEach(renderSlipCard);
+  updateConfirmBar();
+}
+
+function renderSlipCard(slip) {
+  const grid = document.getElementById('slip-grid');
+  const catOpts = data.categories.map(c =>
+    `<option value="${esc(c)}"${c===slip.category?' selected':''}>${esc(c)}</option>`
+  ).join('');
+  const statusHtml =
+    slip.status==='loading' ? `<span class="slip-status reading"><span class="spinner"></span> กำลังโหลดรูป...</span>` :
+    slip.status==='reading' ? `<span class="slip-status reading"><span class="spinner"></span> OCR กำลังอ่านข้อความ...</span>` :
+    slip.status==='error'   ? `<span class="slip-status err"><i class="ti ti-alert-circle"></i> ${esc(slip.errorMsg||'อ่านไม่สำเร็จ')} &nbsp;<button class="btn btn-sm" onclick="retrySlip('${slip.id}')"><i class="ti ti-refresh"></i> ลองใหม่</button></span>` :
+    `<span class="slip-status done"><i class="ti ti-circle-check"></i> OCR อ่านสำเร็จ — ตรวจสอบและเลือกแผนก</span>`;
+  const totalAmt = parseFloat(slip.amount)||0;
+  const splits = slip.splits || [];
+  const splitTotal = splits.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+  const remaining = Math.round((totalAmt - splitTotal)*100)/100;
+  const remainingFmt = v => '฿'+Math.abs(v).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const remainingStr = remaining===0 ? '✓ ยอดครบ' : remaining>0 ? `ยังขาดอีก ${remainingFmt(remaining)}` : `เกินมา ${remainingFmt(remaining)}`;
+  const remainingClass = remaining===0?'ok':remaining>0?'under':'over';
+
+  const splitRowsHtml = splits.map((r,i)=>{
+    const catOpts2 = data.categories.map(c=>`<option value="${esc(c)}"${c===r.category?' selected':''}>${esc(c)}</option>`).join('');
+    return `<div class="split-row">
+      <select onchange="updateSplitRow('${slip.id}',${i},'category',this.value)">${catOpts2}</select>
+      <input type="number" value="${r.amount||''}" placeholder="0.00" min="0" step="0.01"
+        onchange="updateSplitAmt('${slip.id}',${i},this.value)">
+      <button class="split-remove-btn" onclick="removeSplitRow('${slip.id}',${i})" title="ลบ"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join('');
+
+  const fieldsHtml = (slip.status==='done'||slip.status==='error') ? `
+    <div class="slip-fields">
+      <div class="slip-field"><label>วันที่</label>
+        <input type="date" value="${esc(slip.date)}" onchange="updateSlipField('${slip.id}','date',this.value)"></div>
+      <div class="slip-field"><label>จำนวนเงินรวม (฿)</label>
+        <input type="number" value="${esc(slip.amount)}" placeholder="0.00" step="0.01" onchange="updateSlipField('${slip.id}','amount',this.value);renderSlipCard(slips.find(s=>s.id=='${slip.id}'))"></div>
+      <div class="slip-field"><label>จ่ายให้</label>
+        <input type="text" value="${esc(slip.transfer)}" onchange="updateSlipField('${slip.id}','transfer',this.value)"></div>
+      <div class="slip-field"><label>บริษัท / ร้านค้า</label>
+        <input type="text" value="${esc(slip.company)}" onchange="updateSlipField('${slip.id}','company',this.value)"></div>
+      <div class="slip-field" style="grid-column:1/-1"><label>รายละเอียด / หมายเหตุ</label>
+        <input type="text" value="${esc(slip.details)}" onchange="updateSlipField('${slip.id}','details',this.value)"></div>
+    </div>
+    <div class="split-section">
+      <div class="split-toggle-row">
+        <span class="split-toggle-label"><i class="ti ti-scissors" style="font-size:13px;margin-right:4px"></i>แยกยอดหลาย Category</span>
+        <button class="toggle-btn ${splits.length?'active':''}" onclick="toggleSplit('${slip.id}')">
+          ${splits.length ? 'เปิดอยู่ · ปิด' : 'เปิดใช้งาน'}
+        </button>
+      </div>
+      ${splits.length===0 ? `
+        <div style="font-size:12px;color:var(--text2)">
+          <i class="ti ti-tag" style="margin-right:4px"></i>
+          <span style="font-weight:600;color:var(--green-dark)">★ แผนก (เลือกเอง)</span>
+          <select style="margin-left:8px;padding:5px 8px;font-size:13px" onchange="updateSlipField('${slip.id}','category',this.value)">${catOpts}</select>
+        </div>` : `
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px;display:grid;grid-template-columns:1fr 110px 24px;gap:6px">
+          <span>แผนก</span><span style="text-align:right">จำนวนเงิน (฿)</span><span></span>
+        </div>
+        <div class="split-rows">${splitRowsHtml}</div>
+        <button class="btn split-add-btn" onclick="addSplitRow('${slip.id}')"><i class="ti ti-plus"></i> เพิ่มแผนก</button>
+        <div class="split-total-row">
+          <span style="color:var(--text2)">ยอดรวมสลิป: <strong>฿${totalAmt.toLocaleString('th-TH',{minimumFractionDigits:2})}</strong></span>
+          <span class="split-remaining ${remainingClass}">${remainingStr}</span>
+        </div>`}
+    </div>` : `<div style="font-size:13px;color:var(--text2);padding:8px 0">รอ OCR อ่านข้อความ...</div>`;
+  const html = `<div class="slip-card ${slip.status==='error'?'error':slip.status==='done'?'success':''}" id="slip-card-${slip.id}">
+    <div class="slip-card-header">
+      <span style="font-size:12px;color:var(--text2)">${esc(slip.file.name)}</span>
+      <button class="slip-remove" onclick="removeSlip('${slip.id}')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="slip-card-inner">
+      ${slip.dataUrl ? `<img class="slip-thumb" src="${slip.dataUrl}" alt="slip">` : `<div class="slip-thumb-placeholder"><i class="ti ti-photo"></i></div>`}
+      <div class="slip-body">${statusHtml}${fieldsHtml}</div>
+    </div>
+  </div>`;
+  const existing = document.getElementById('slip-card-'+slip.id);
+  if (existing) existing.outerHTML = html;
+  else grid.insertAdjacentHTML('beforeend', html);
+}
+
+function updateSlipStatus(id, status) {
+  const s=slips.find(x=>x.id==id); if(s){s.status=status;renderSlipCard(s);}
+}
+function updateSlipField(id, field, value) {
+  const s=slips.find(x=>x.id==id); if(s) s[field]=value;
+}
+function removeSlip(id) {
+  slips=slips.filter(s=>s.id!=id);
+  const el=document.getElementById('slip-card-'+id); if(el) el.remove();
+  updateConfirmBar();
+}
+function retrySlip(id) {
+  const slip=slips.find(s=>s.id==id); if(!slip) return;
+  slip.status='reading'; renderSlipCard(slip);
+  readSlipWithOCR(slip);
+}
+function clearAllSlips() {
+  slips=[]; document.getElementById('slip-grid').innerHTML=''; updateConfirmBar();
+}
+function updateConfirmBar() {
+  const bar=document.getElementById('slip-confirm-bar'); if(!bar) return;
+  if(!slips.length){bar.style.display='none';return;}
+  bar.style.display='';
+  const done=slips.filter(s=>s.status==='done').length;
+  document.getElementById('slip-confirm-count').textContent=
+    `พร้อมบันทึก ${done} รายการ จากทั้งหมด ${slips.length} สลิป`;
+}
+function confirmAllSlips() {
+  const ready=slips.filter(s=>s.status==='done');
+  if(!ready.length){alert('ยังไม่มีสลิปที่อ่านสำเร็จ');return;}
+  let saved=0;
+  ready.forEach(slip=>{
+    const totalAmt=parseFloat(slip.amount);
+    if(!slip.date||isNaN(totalAmt)||totalAmt<=0) return;
+
+    if (slip.splits && slip.splits.length>0) {
+      // validate split total
+      const splitTotal=slip.splits.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
+      const diff=Math.abs(totalAmt-splitTotal);
+      if(diff>0.02){ alert(`สลิป "${slip.file.name}": ยอดแยกไม่ตรงกับยอดรวม\nยอดรวม: ฿${totalAmt}\nยอดแยกรวม: ฿${splitTotal.toFixed(2)}`); return; }
+      // create one entry per split row
+      slip.splits.forEach(row=>{
+        const amt=parseFloat(row.amount);
+        if(!amt||amt<=0) return;
+        const entry={
+          id:Date.now()+Math.random(), dt:slip.date, amount:amt,
+          transfer:slip.transfer||'', company:slip.company||'',
+          category:row.category||data.categories[0]||'',
+          details:(slip.details?(slip.details+' · '):'')+'แยกยอดจากสลิป'
+        };
+        data.entries.unshift(entry);
+        if(entry.company&&!data.companies.includes(entry.company)) data.companies.push(entry.company);
+        saved++;
+      });
+    } else {
+      const entry={
+        id:Date.now()+Math.random(), dt:slip.date, amount:totalAmt,
+        transfer:slip.transfer||'', company:slip.company||'',
+        category:slip.category||data.categories[0]||'', details:slip.details||''
+      };
+      data.entries.unshift(entry);
+      if(entry.company&&!data.companies.includes(entry.company)) data.companies.push(entry.company);
+      saved++;
+    }
+  });
+  if(!saved){alert('ข้อมูลไม่ครบ — กรุณาตรวจสอบวันที่และจำนวนเงิน');return;}
+  save();
+  clearAllSlips();
+  showToast(`บันทึก ${saved} รายการเรียบร้อย ✓`);
+  switchTab('records');
+}
+
+/* ── Split helpers ── */
+function toggleSplit(id) {
+  const slip=slips.find(s=>s.id==id); if(!slip) return;
+  if (slip.splits && slip.splits.length>0) {
+    slip.splits=[];
+  } else {
+    // start with one row using current single category
+    slip.splits=[{ category:slip.category||data.categories[0]||'', amount:'' }];
+  }
+  renderSlipCard(slip);
+}
+
+function addSplitRow(id) {
+  const slip=slips.find(s=>s.id==id); if(!slip) return;
+  if(!slip.splits) slip.splits=[];
+  slip.splits.push({ category:data.categories[0]||'', amount:'' });
+  renderSlipCard(slip);
+}
+
+function removeSplitRow(id, idx) {
+  const slip=slips.find(s=>s.id==id); if(!slip||!slip.splits) return;
+  slip.splits.splice(idx,1);
+  if(slip.splits.length===0) slip.splits=[];
+  renderSlipCard(slip);
+}
+
+function updateSplitRow(id, idx, field, value) {
+  const slip=slips.find(s=>s.id==id); if(!slip||!slip.splits) return;
+  slip.splits[idx][field]=value;
+  renderSlipCard(slip);
+}
+
+function updateSplitAmt(id, idx, amt) {
+  const slip=slips.find(s=>s.id==id); if(!slip||!slip.splits) return;
+  slip.splits[idx].amount=amt;
+  renderSlipCard(slip);
+}
+
+
+/* ═══════════════════════════════════════════
+   EXPENSE CATEGORY HINTS
+   ═══════════════════════════════════════════ */
+const EXPENSE_HINTS = {
+  'ต้นทุนขาย (Cost of Goods Sold)':         'วัตถุดิบ, บรรจุภัณฑ์',
+  'ค่าแรงงาน (Labor)':                       'เงินเดือน, ค่าแรงชั่วคราว, OT',
+  'ค่าสาธารณูปโภค (Utilities)':              'ค่าไฟ, ค่าน้ำ, แก๊ส, อินเทอร์เน็ต',
+  'ค่าเช่า (Rent)':                          'ค่าเช่าพื้นที่, ค่าเช่าอุปกรณ์',
+  'การตลาด (Marketing)':                     'โฆษณา, Delivery platform, Promotion',
+  'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)': 'ซ่อมเครื่องมือ, ซื้ออุปกรณ์ครัว',
+  'ค่าใช้จ่ายทั่วไป (General & Admin)':      'เครื่องเขียน, ค่าธรรมเนียมธนาคาร, ของใช้สำนักงาน'
+};
+
+function updateExpenseHint() {
+  const val = document.getElementById('f-expense-cat').value;
+  const hint = document.getElementById('expense-cat-hint');
+  if (hint) hint.textContent = EXPENSE_HINTS[val] || '';
+}
+/* ═══════════════════════════════════════════
+   PIN LOCK
+   ═══════════════════════════════════════════ */
+// PIN_KEY, pinBuffer, pinSetupStage, pinSetupFirst declared in <head>
+
+function simpleHash(s){ let h=0; for(let i=0;i<s.length;i++){h=Math.imul(31,h)+s.charCodeAt(i)|0;} return h.toString(36); }
+
+function initPin(){
+  const stored = localStorage.getItem(PIN_KEY);
+  if(!stored){
+    // First run — setup PIN
+    pinSetupStage = 1;
+    document.getElementById('pin-title').textContent = 'ตั้ง PIN ใหม่';
+    document.getElementById('pin-sub').textContent = 'กรอก PIN 4 หลักที่ต้องการใช้';
+    document.getElementById('pin-setup-step').textContent = 'ขั้นตอน 1/2';
+  } else {
+    pinSetupStage = 0;
+    document.getElementById('pin-sub').textContent = 'กรอก PIN 4 หลักเพื่อเข้าใช้งาน';
+  }
+}
+
+function pinKey(d){
+  if(pinBuffer.length >= 4) return;
+  pinBuffer += d;
+  updatePinDots();
+  if(pinBuffer.length === 4) setTimeout(()=>checkPin(), 80);
+}
+
+function pinBackspace(){
+  pinBuffer = pinBuffer.slice(0,-1);
+  updatePinDots();
+  document.getElementById('pin-error').textContent = '';
+}
+
+function updatePinDots(state){
+  for(let i=0;i<4;i++){
+    const dot = document.getElementById('pd'+i);
+    dot.classList.toggle('filled', i < pinBuffer.length);
+    dot.classList.toggle('error', state==='error');
+  }
+}
+
+function checkPin(){
+  if(pinSetupStage===1){
+    // first entry of new PIN
+    if(pinBuffer.length<4){ pinBuffer=''; updatePinDots(); return; }
+    pinSetupFirst = pinBuffer; pinBuffer='';
+    pinSetupStage=2;
+    document.getElementById('pin-sub').textContent = 'ยืนยัน PIN อีกครั้ง';
+    document.getElementById('pin-setup-step').textContent = 'ขั้นตอน 2/2';
+    updatePinDots();
+    return;
+  }
+  if(pinSetupStage===2){
+    if(pinBuffer !== pinSetupFirst){
+      document.getElementById('pin-error').textContent = 'PIN ไม่ตรงกัน — ลองใหม่';
+      updatePinDots('error');
+      setTimeout(()=>{ pinBuffer=''; pinSetupStage=1; pinSetupFirst='';
+        document.getElementById('pin-sub').textContent='กรอก PIN 4 หลักที่ต้องการใช้';
+        document.getElementById('pin-setup-step').textContent='ขั้นตอน 1/2';
+        document.getElementById('pin-error').textContent='';
+        updatePinDots(); }, 800);
+      return;
+    }
+    localStorage.setItem(PIN_KEY, simpleHash(pinBuffer));
+    unlockApp();
+    return;
+  }
+  // normal unlock
+  if(simpleHash(pinBuffer) === localStorage.getItem(PIN_KEY)){
+    unlockApp();
+  } else {
+    document.getElementById('pin-error').textContent = 'PIN ไม่ถูกต้อง';
+    updatePinDots('error');
+    setTimeout(()=>{ pinBuffer=''; document.getElementById('pin-error').textContent=''; updatePinDots(); }, 700);
+  }
+}
+
+function unlockApp(){
+  document.getElementById('pin-overlay').style.display='none';
+  pinBuffer='';
+}
+
+function changePinFromSettings(){
+  // Re-show pin overlay in setup mode
+  pinBuffer=''; pinSetupStage=1; pinSetupFirst='';
+  document.getElementById('pin-title').textContent='เปลี่ยน PIN';
+  document.getElementById('pin-sub').textContent='กรอก PIN 4 หลักใหม่';
+  document.getElementById('pin-setup-step').textContent='ขั้นตอน 1/2';
+  document.getElementById('pin-error').textContent='';
+  updatePinDots();
+  document.getElementById('pin-overlay').style.display='flex';
+}
+
+/* ═══════════════════════════════════════════
+   OFFLINE DETECTION
+   ═══════════════════════════════════════════ */
+function initOfflineDetection(){
+  const bar = document.getElementById('offline-bar');
+  function update(){
+    if(!navigator.onLine){
+      bar.classList.add('show');
+      document.body.classList.add('has-offline-bar');
+    } else {
+      bar.classList.remove('show');
+      document.body.classList.remove('has-offline-bar');
+      // try to sync pending when back online
+      if(driveState.pendingSync && driveState.signedIn) syncToDrive('auto');
+    }
+  }
+  window.addEventListener('online', update);
+  window.addEventListener('offline', update);
+  update();
+}
+
+/* ═══════════════════════════════════════════
+   GOOGLE USER PROFILE
+   ═══════════════════════════════════════════ */
+async function fetchUserProfile(accessToken){
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { 'Authorization': 'Bearer ' + accessToken }
+    });
+    const info = await res.json();
+    driveState.currentUser = { name: info.name||info.email, email: info.email, avatar: info.picture||'' };
+    localStorage.setItem('spending_user', JSON.stringify(driveState.currentUser));
+    // update user pill
+    const pill = document.getElementById('user-pill');
+    const avatar = document.getElementById('user-avatar');
+    const nameEl = document.getElementById('user-name-short');
+    if(pill){ pill.style.display='inline-flex'; }
+    if(avatar && driveState.currentUser.avatar){ avatar.src=driveState.currentUser.avatar; }
+    const firstName = (driveState.currentUser.name||'').split(' ')[0];
+    if(nameEl) nameEl.textContent = firstName;
+  } catch(e){ console.warn('Could not fetch user profile:', e); }
+}
+
+function showUserMenu(){
+  if(!driveState.currentUser) return;
+  const u = driveState.currentUser;
+  if(confirm(`ผู้ใช้: ${u.name}\n${u.email}\n\nต้องการออกจาก Google Drive หรือเปลี่ยน PIN?`)){
+    const choice = prompt('พิมพ์ "logout" เพื่อออก หรือ "pin" เพื่อเปลี่ยน PIN');
+    if(choice==='logout') toggleDriveAuth();
+    if(choice==='pin') changePinFromSettings();
+  }
+}
+
+/* ═══════════════════════════════════════════
+   AUTO TOKEN REFRESH
+   ═══════════════════════════════════════════ */
+function scheduleTokenRefresh(expiresIn){
+  if(driveState.tokenRefreshTimer) clearTimeout(driveState.tokenRefreshTimer);
+  // refresh 5 minutes before expiry
+  const refreshIn = Math.max((expiresIn - 300) * 1000, 60000);
+  driveState.tokenRefreshTimer = setTimeout(()=>{
+    if(driveState.signedIn && driveState.tokenClient){
+      driveState.tokenClient.requestAccessToken({ prompt: '' }); // silent refresh
+    }
+  }, refreshIn);
+}
+
+/* ═══════════════════════════════════════════
+   LAST UPDATED BAR
+   ═══════════════════════════════════════════ */
+function updateLastUpdatedBar(){
+  const bar  = document.getElementById('last-updated-bar');
+  const txt  = document.getElementById('last-updated-text');
+  const img  = document.getElementById('last-updated-avatar');
+  if(!bar||!data._lastUpdatedAt) return;
+  const dt = new Date(data._lastUpdatedAt);
+  const dtStr = dt.toLocaleDateString('th-TH',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+  txt.textContent = `อัปเดตล่าสุด: ${dtStr} โดย ${data._lastUpdatedBy||'Unknown'}  |  v${data._version||0}`;
+  if(img && data._lastUpdatedAvatar){ img.src=data._lastUpdatedAvatar; img.style.display='inline'; }
+  bar.style.display='flex';
+}
+</script>
+</body>
+</html>
