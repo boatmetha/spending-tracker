@@ -10,6 +10,11 @@ var PIN_KEY = 'spending_pin_hash';
 var pinBuffer = '';
 var pinSetupStage = 0;
 var pinSetupFirst = '';
+var OWNER_PIN_KEY = 'spending_owner_pin_hash';
+var ownerPinBuffer = '';
+var ownerPinSetupStage = 0;
+var ownerPinSetupFirst = '';
+var selectedPayment = 'transfer';
 </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" onerror="window.XLSX_FAILED=true"></script>
@@ -261,9 +266,99 @@ var pinSetupFirst = '';
   /* ── DELETED ENTRIES ── */
   .deleted-badge { display:inline-flex; align-items:center; gap:3px; background:#fcebeb; color:var(--red); border-radius:99px; padding:2px 7px; font-size:10px; font-weight:600; }
   .show-deleted-toggle { font-size:12px; color:var(--text2); cursor:pointer; text-decoration:underline; }
+
+  /* ── PAYMENT METHOD ── */
+  .payment-toggle { display:flex; gap:6px; }
+  .payment-btn { flex:1; padding:8px 12px; border:0.5px solid var(--border2); border-radius:var(--radius); font-size:13px; font-weight:600; cursor:pointer; background:var(--surface); color:var(--text2); font-family:inherit; transition:all .15s; display:flex; align-items:center; justify-content:center; gap:6px; }
+  .payment-btn:hover { background:var(--surface2); }
+  .payment-btn.selected-cash { background:#1a5276; color:#fff; border-color:transparent; }
+  .payment-btn.selected-transfer { background:var(--text); color:#fff; border-color:transparent; }
+  .cash-warning { font-size:12px; color:#BA7517; margin-top:5px; display:none; }
+  .cash-warning.show { display:block; }
+
+  /* ── OWNER PAGE ── */
+  #owner-overlay { position:fixed; inset:0; background:var(--bg); z-index:8500; display:none; flex-direction:column; }
+  #owner-overlay.show { display:flex; }
+  .owner-header { background:var(--text); color:#fff; padding:1rem 1.5rem; display:flex; align-items:center; justify-content:space-between; }
+  .owner-header h2 { font-size:16px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .owner-body { flex:1; overflow-y:auto; padding:1.5rem 1rem 2rem; max-width:860px; margin:0 auto; width:100%; }
+  .pocket-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:1.5rem; }
+  .pocket-card { background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:1.25rem; }
+  .pocket-card-name { font-size:12px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+  .pocket-card-balance { font-size:26px; font-weight:600; margin-bottom:4px; }
+  .pocket-card-balance.low { color:var(--red); }
+  .pocket-card-balance.ok { color:#1a5276; }
+  .pocket-card-spent { font-size:12px; color:var(--text2); }
+  .pocket-topup-row { display:flex; gap:8px; margin-top:10px; }
+  .pocket-topup-row input { flex:1; padding:6px 8px; font-size:13px; }
+  .topup-history { margin-top:1rem; }
+  .topup-history-title { font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; }
+  .topup-item { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:0.5px solid var(--border); font-size:13px; }
+  .topup-item:last-child { border-bottom:none; }
+  .topup-amount { font-weight:600; color:#1a5276; }
+  .owner-pin-box { background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:2rem; width:320px; margin:auto; text-align:center; }
+  .owner-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:1.5rem; }
 </style>
 </head>
 <body>
+<!-- OWNER OVERLAY -->
+<div id="owner-overlay">
+  <!-- Owner PIN gate -->
+  <div id="owner-pin-gate" style="display:flex;flex:1;align-items:center;justify-content:center;background:var(--bg)">
+    <div class="owner-pin-box">
+      <div class="pin-logo" style="background:#1a5276"><i class="ti ti-shield-lock"></i></div>
+      <div class="pin-title" id="owner-pin-title">Owner Access</div>
+      <div class="pin-sub" id="owner-pin-sub">กรอก Owner PIN</div>
+      <div class="pin-setup-step" id="owner-pin-setup-step"></div>
+      <div class="pin-dots" id="owner-pin-dots">
+        <div class="pin-dot" id="opd0"></div>
+        <div class="pin-dot" id="opd1"></div>
+        <div class="pin-dot" id="opd2"></div>
+        <div class="pin-dot" id="opd3"></div>
+      </div>
+      <div class="pin-error-msg" id="owner-pin-error"></div>
+      <div class="pin-keypad">
+        <button class="pin-key" onclick="ownerPinKey('1')">1</button>
+        <button class="pin-key" onclick="ownerPinKey('2')">2</button>
+        <button class="pin-key" onclick="ownerPinKey('3')">3</button>
+        <button class="pin-key" onclick="ownerPinKey('4')">4</button>
+        <button class="pin-key" onclick="ownerPinKey('5')">5</button>
+        <button class="pin-key" onclick="ownerPinKey('6')">6</button>
+        <button class="pin-key" onclick="ownerPinKey('7')">7</button>
+        <button class="pin-key" onclick="ownerPinKey('8')">8</button>
+        <button class="pin-key" onclick="ownerPinKey('9')">9</button>
+        <button class="pin-key"></button>
+        <button class="pin-key" onclick="ownerPinKey('0')">0</button>
+        <button class="pin-key del" onclick="ownerPinBackspace()"><i class="ti ti-backspace"></i></button>
+      </div>
+      <button class="btn" style="width:100%;margin-top:8px" onclick="closeOwnerPage()"><i class="ti ti-x"></i> ยกเลิก</button>
+    </div>
+  </div>
+  <!-- Owner content (shown after PIN) -->
+  <div id="owner-content" style="display:none;flex:1;flex-direction:column;overflow:hidden">
+    <div class="owner-header">
+      <h2><i class="ti ti-shield-lock"></i> Owner Dashboard</h2>
+      <div style="display:flex;gap:8px">
+        <button class="btn" style="background:rgba(255,255,255,.15);color:#fff;border-color:transparent;font-size:12px" onclick="changeOwnerPin()"><i class="ti ti-key"></i> เปลี่ยน PIN</button>
+        <button class="btn" style="background:rgba(255,255,255,.15);color:#fff;border-color:transparent;font-size:12px" onclick="closeOwnerPage()"><i class="ti ti-x"></i> ปิด</button>
+      </div>
+    </div>
+    <div class="owner-body">
+      <!-- Summary -->
+      <div class="card-title" style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">สรุปยอดเงินสด</div>
+      <div class="owner-summary-grid" id="owner-summary"></div>
+      <!-- Pocket cards -->
+      <div class="card-title" style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;margin-top:1rem">กระเป๋าเงินสดแต่ละแผนก</div>
+      <div class="pocket-grid" id="pocket-grid"></div>
+      <!-- Top-up history -->
+      <div class="card" style="margin-top:1rem">
+        <div class="card-title">ประวัติการเติมเงินสด</div>
+        <div id="topup-history-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- OFFLINE BAR -->
 <div id="offline-bar"><i class="ti ti-wifi-off" style="margin-right:6px"></i>ไม่มีการเชื่อมต่ออินเทอร์เน็ต — ข้อมูลบันทึกใน browser แต่ยังไม่ได้ซิงค์ Drive</div>
 
@@ -315,6 +410,9 @@ var pinSetupFirst = '';
         <span class="dot"></span>
         <span id="drive-pill-text">เชื่อมต่อ Google Drive</span>
       </div>
+      <button class="btn btn-sm" style="font-size:11px;padding:5px 10px" onclick="openOwnerPage()" title="Owner Dashboard">
+        <i class="ti ti-shield-lock"></i>
+      </button>
       <div id="user-pill" class="user-pill" style="display:none" onclick="showUserMenu()">
         <img id="user-avatar" src="" alt="">
         <span id="user-name-short"></span>
@@ -485,6 +583,7 @@ var pinSetupFirst = '';
         <table>
           <thead><tr>
             <th>วันที่</th>
+            <th>ชำระด้วย</th>
             <th>จ่ายให้</th>
             <th>บริษัท / ร้านค้า</th>
             <th>แผนก</th>
@@ -572,7 +671,7 @@ const MAX_BACKUPS = 30; // เก็บ backup สูงสุด 30 ไฟล�
    ═══════════════════════════════════════════ */
 const PALETTE = ['#1D9E75','#D85A30','#378ADD','#BA7517','#D4537E','#639922','#7F77DD','#3C3489','#885500','#185FA5'];
 const DEFAULT_CATS = ['Milkbar','Taihu','Bakelab','Nooch Coffee','ครัวร้อน'];
-let data = { entries: [], categories: [...DEFAULT_CATS], companies: [], _version: 0, _lastUpdatedBy: '', _lastUpdatedAt: '', _lastUpdatedAvatar: '' };
+let data = { entries: [], categories: [...DEFAULT_CATS], companies: [], _version: 0, _lastUpdatedBy: '', _lastUpdatedAt: '', _lastUpdatedAvatar: '', cashPockets: {}, topupHistory: [] };
 let pendingEntry = null;
 let driveState = { signedIn: false, fileId: null, folderId: null, backupFolderId: null, tokenClient: null, gapiReady: false, pendingSync: false, syncFailCount: 0, retryTimer: null, lastBackupTime: 0, dbVersion: 0, currentUser: null, tokenRefreshTimer: null };
 
@@ -1061,6 +1160,7 @@ function onCompanyInput() {
 function pickCompany(n){ document.getElementById('f-company').value=n; hideDrop(); }
 function clearForm(){
   ['f-amount','f-transfer','f-company','f-details','f-expense-cat'].forEach(id=>document.getElementById(id).value='');
+  selectPayment('transfer');
   setDefaultDT();
 }
 
@@ -1073,16 +1173,18 @@ function previewEntry() {
   const transfer=document.getElementById('f-transfer').value.trim();
   const company=document.getElementById('f-company').value.trim();
   const category=getSelectedCategory();
+  const paymentMethod=getSelectedPayment();
   const details=document.getElementById('f-details').value.trim();
   if(!dt){alert('กรุณาเลือกวันที่และเวลา');return;}
   if(isNaN(amount)||amount<=0){alert('กรุณากรอกจำนวนเงินให้ถูกต้อง');return;}
   if(!category){alert('กรุณาเลือกแผนก');return;}
-  pendingEntry={id:Date.now(),dt,amount,transfer,company,category,details,expenseCat:document.getElementById('f-expense-cat').value};
+  pendingEntry={id:Date.now(),dt,amount,transfer,company,category,details,expenseCat:document.getElementById('f-expense-cat').value,paymentMethod};
   const color=catColor(category);
   const rows=[
     {label:'วันที่',v:fmtDT(dt),icon:'ti-calendar'},
     {label:'จ่ายให้',v:transfer||'—',icon:'ti-user'},
     {label:'บริษัท / ร้านค้า',v:company||'—',icon:'ti-building'},
+    {label:'วิธีชำระ',v:paymentMethod==='cash'?'💵 เงินสด (Cash)':'🏦 โอนเงิน (Transfer)',icon:'ti-credit-card'},
     {label:'แผนก',v:`<span class="badge" style="background:${color}22;color:${color}">${esc(category)}</span>`,icon:'ti-tag',html:true},
     {label:'รายละเอียด',v:details||'—',icon:'ti-notes'},
     {label:'ประเภทค่าใช้จ่าย',v:document.getElementById('f-expense-cat').value||'—',icon:'ti-briefcase'},
@@ -1103,6 +1205,11 @@ function confirmEntry(){
   pendingEntry.createdAt  = new Date().toISOString();
   data.entries.unshift(pendingEntry);
   if(pendingEntry.company&&!data.companies.includes(pendingEntry.company)) data.companies.push(pendingEntry.company);
+  // deduct cash pocket if payment is cash
+  if(pendingEntry.paymentMethod==='cash' && pendingEntry.category){
+    if(!data.cashPockets[pendingEntry.category]) data.cashPockets[pendingEntry.category]=0;
+    data.cashPockets[pendingEntry.category] = Math.max(0, (data.cashPockets[pendingEntry.category]||0) - pendingEntry.amount);
+  }
 
   save();
   pendingEntry=null;
@@ -1146,13 +1253,14 @@ function renderRecords(){
   });
   const tbody=document.getElementById('records-body');
   if(!f.length){
-    tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><i class="ti ti-inbox" style="font-size:30px;display:block;margin-bottom:10px"></i>ไม่พบรายการ</div></td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="9"><div class="empty"><i class="ti ti-inbox" style="font-size:30px;display:block;margin-bottom:10px"></i>ไม่พบรายการ</div></td></tr>`;
     document.getElementById('rec-total').textContent=''; return;
   }
   tbody.innerHTML=f.map(e=>{
     const color=catColor(e.category);
     return `<tr>
       <td style="font-size:12px">${fmtDT(e.dt)}</td>
+      <td>${e.paymentMethod==='cash'?'💵 Cash':'🏦 Transfer'}</td>
       <td>${esc(e.transfer||'—')}</td>
       <td>${esc(e.company||'—')}</td>
       <td><span class="badge" style="background:${color}22;color:${color}">${esc(e.category)}</span></td>
@@ -1222,11 +1330,12 @@ function exportExcel(){
     const sheets = [];
 
     // Sheet 1: ยอดรวมทั้งหมด
-    const hdr = ['วันที่','จ่ายให้','บริษัท / ร้านค้า','แผนก','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)'];
+    const hdr = ['วันที่','ชำระด้วย','จ่ายให้','บริษัท / ร้านค้า','แผนก','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)'];
     const allRows = [
       hdr,
       ...data.entries.map(e=>[
         e.dt ? e.dt.slice(0,10) : '',
+        e.paymentMethod==='cash'?'Cash':'Transfer',
         e.transfer || '',
         e.company || '',
         e.category || '',
@@ -2063,6 +2172,200 @@ function updateLastUpdatedBar(){
   txt.textContent = `อัปเดตล่าสุด: ${dtStr} โดย ${data._lastUpdatedBy||'Unknown'}  |  v${data._version||0}`;
   if(img && data._lastUpdatedAvatar){ img.src=data._lastUpdatedAvatar; img.style.display='inline'; }
   bar.style.display='flex';
+}
+/* ═══════════════════════════════════════════
+   PAYMENT METHOD
+   ═══════════════════════════════════════════ */
+function selectPayment(method) {
+  selectedPayment = method;
+  document.getElementById('pay-cash').className = 'payment-btn' + (method==='cash'?' selected-cash':'');
+  document.getElementById('pay-transfer').className = 'payment-btn' + (method==='transfer'?' selected-transfer':'');
+  updateCashWarning();
+}
+function getSelectedPayment() { return selectedPayment || 'transfer'; }
+
+function updateCashWarning() {
+  const warn = document.getElementById('cash-pocket-warning');
+  if(!warn) return;
+  if(selectedPayment !== 'cash'){ warn.classList.remove('show'); return; }
+  const cat = getSelectedCategory();
+  const balance = (data.cashPockets && data.cashPockets[cat]) || 0;
+  const amt = parseFloat(document.getElementById('f-amount').value) || 0;
+  if(balance <= 0){
+    warn.textContent = `⚠ กระเป๋าเงินสด ${cat} ยังไม่มียอด — กรุณาเติมเงินใน Owner Dashboard`;
+    warn.classList.add('show');
+  } else if(amt > balance){
+    warn.textContent = `⚠ ยอดเงินสดใน ${cat} คงเหลือ ฿${fmtBahtShort(balance)} — ไม่พอจ่าย`;
+    warn.classList.add('show');
+  } else if(balance > 0){
+    warn.textContent = `💵 ยอดคงเหลือใน ${cat}: ฿${fmtBahtShort(balance)}`;
+    warn.classList.add('show');
+    warn.style.color = 'var(--green-dark)';
+  }
+}
+
+/* ═══════════════════════════════════════════
+   OWNER PIN
+   ═══════════════════════════════════════════ */
+function openOwnerPage() {
+  document.getElementById('owner-overlay').classList.add('show');
+  document.getElementById('owner-content').style.display = 'none';
+  document.getElementById('owner-pin-gate').style.display = 'flex';
+  ownerPinBuffer = '';
+  const stored = localStorage.getItem(OWNER_PIN_KEY);
+  if(!stored){
+    ownerPinSetupStage = 1;
+    document.getElementById('owner-pin-title').textContent = 'ตั้ง Owner PIN';
+    document.getElementById('owner-pin-sub').textContent = 'กรอก PIN 4 หลักสำหรับ Owner';
+    document.getElementById('owner-pin-setup-step').textContent = 'ขั้นตอน 1/2';
+  } else {
+    ownerPinSetupStage = 0;
+    document.getElementById('owner-pin-title').textContent = 'Owner Access';
+    document.getElementById('owner-pin-sub').textContent = 'กรอก Owner PIN';
+    document.getElementById('owner-pin-setup-step').textContent = '';
+  }
+  updateOwnerDots();
+}
+
+function closeOwnerPage() {
+  document.getElementById('owner-overlay').classList.remove('show');
+  ownerPinBuffer = '';
+}
+
+function ownerPinKey(d) {
+  if(ownerPinBuffer.length >= 4) return;
+  ownerPinBuffer += d;
+  updateOwnerDots();
+  if(ownerPinBuffer.length === 4) setTimeout(()=>checkOwnerPin(), 80);
+}
+
+function ownerPinBackspace() {
+  ownerPinBuffer = ownerPinBuffer.slice(0,-1);
+  updateOwnerDots();
+  document.getElementById('owner-pin-error').textContent = '';
+}
+
+function updateOwnerDots(state) {
+  for(let i=0;i<4;i++){
+    const dot = document.getElementById('opd'+i);
+    if(!dot) return;
+    dot.classList.toggle('filled', i < ownerPinBuffer.length);
+    dot.classList.toggle('error', state==='error');
+  }
+}
+
+function checkOwnerPin() {
+  if(ownerPinSetupStage===1){
+    ownerPinSetupFirst = ownerPinBuffer; ownerPinBuffer = '';
+    ownerPinSetupStage = 2;
+    document.getElementById('owner-pin-sub').textContent = 'ยืนยัน Owner PIN อีกครั้ง';
+    document.getElementById('owner-pin-setup-step').textContent = 'ขั้นตอน 2/2';
+    updateOwnerDots(); return;
+  }
+  if(ownerPinSetupStage===2){
+    if(ownerPinBuffer !== ownerPinSetupFirst){
+      document.getElementById('owner-pin-error').textContent = 'PIN ไม่ตรงกัน — ลองใหม่';
+      updateOwnerDots('error');
+      setTimeout(()=>{ ownerPinBuffer=''; ownerPinSetupStage=1; ownerPinSetupFirst='';
+        document.getElementById('owner-pin-sub').textContent='กรอก PIN 4 หลักสำหรับ Owner';
+        document.getElementById('owner-pin-setup-step').textContent='ขั้นตอน 1/2';
+        document.getElementById('owner-pin-error').textContent='';
+        updateOwnerDots(); }, 800);
+      return;
+    }
+    localStorage.setItem(OWNER_PIN_KEY, simpleHash(ownerPinBuffer));
+    unlockOwnerPage(); return;
+  }
+  if(simpleHash(ownerPinBuffer) === localStorage.getItem(OWNER_PIN_KEY)){
+    unlockOwnerPage();
+  } else {
+    document.getElementById('owner-pin-error').textContent = 'PIN ไม่ถูกต้อง';
+    updateOwnerDots('error');
+    setTimeout(()=>{ ownerPinBuffer=''; document.getElementById('owner-pin-error').textContent=''; updateOwnerDots(); }, 700);
+  }
+}
+
+function unlockOwnerPage() {
+  document.getElementById('owner-pin-gate').style.display = 'none';
+  document.getElementById('owner-content').style.display = 'flex';
+  renderOwnerDashboard();
+}
+
+function changeOwnerPin() {
+  localStorage.removeItem(OWNER_PIN_KEY);
+  ownerPinBuffer=''; ownerPinSetupStage=1; ownerPinSetupFirst='';
+  document.getElementById('owner-pin-title').textContent='เปลี่ยน Owner PIN';
+  document.getElementById('owner-pin-sub').textContent='กรอก PIN ใหม่ 4 หลัก';
+  document.getElementById('owner-pin-setup-step').textContent='ขั้นตอน 1/2';
+  document.getElementById('owner-pin-error').textContent='';
+  updateOwnerDots();
+  document.getElementById('owner-content').style.display='none';
+  document.getElementById('owner-pin-gate').style.display='flex';
+}
+
+/* ═══════════════════════════════════════════
+   OWNER DASHBOARD — CASH POCKETS
+   ═══════════════════════════════════════════ */
+function renderOwnerDashboard() {
+  const cats = data.categories || [];
+
+  // ── Summary ──
+  const totalPockets = cats.reduce((s,c)=>s+(data.cashPockets[c]||0),0);
+  const totalCashSpent = data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
+  let summaryHtml = `
+    <div class="metric"><div class="metric-label">ยอดเงินสดรวมทุกแผนก</div><div class="metric-value" style="color:#1a5276">${fmtBahtShort(totalPockets)}</div></div>
+    <div class="metric"><div class="metric-label">ใช้ไปด้วยเงินสด (รวม)</div><div class="metric-value">${fmtBahtShort(totalCashSpent)}</div></div>`;
+  document.getElementById('owner-summary').innerHTML = summaryHtml;
+
+  // ── Pocket cards ──
+  let pocketHtml = '';
+  cats.forEach(cat => {
+    const balance = data.cashPockets[cat] || 0;
+    const spent = data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
+    const isLow = balance < 5000;
+    pocketHtml += `<div class="pocket-card">
+      <div class="pocket-card-name">${esc(cat)}</div>
+      <div class="pocket-card-balance ${isLow?'low':'ok'}">${fmtBahtShort(balance)}</div>
+      <div class="pocket-card-spent">ใช้ไปแล้ว: ${fmtBahtShort(spent)}</div>
+      <div class="pocket-topup-row">
+        <input type="number" id="topup-${esc(cat)}" placeholder="เติมเงิน..." min="0" step="100">
+        <button class="btn btn-success btn-sm" onclick="topupPocket('${cat.replace(/'/g,"\\'")}')"><i class="ti ti-plus"></i> เติม</button>
+      </div>
+    </div>`;
+  });
+  document.getElementById('pocket-grid').innerHTML = pocketHtml;
+
+  // ── Top-up history ──
+  const history = (data.topupHistory || []).slice().reverse().slice(0,50);
+  if(!history.length){
+    document.getElementById('topup-history-list').innerHTML = '<p style="font-size:13px;color:var(--text2)">ยังไม่มีประวัติการเติมเงิน</p>';
+  } else {
+    document.getElementById('topup-history-list').innerHTML = history.map(h=>`
+      <div class="topup-item">
+        <div>
+          <span style="font-weight:500">${esc(h.category)}</span>
+          <span style="font-size:11px;color:var(--text2);margin-left:8px">${fmtDT(h.date)} โดย ${esc(h.by||'Unknown')}</span>
+        </div>
+        <span class="topup-amount">+${fmtBaht(h.amount)}</span>
+      </div>`).join('');
+  }
+}
+
+function topupPocket(cat) {
+  const inp = document.getElementById('topup-'+cat);
+  const amount = parseFloat(inp.value);
+  if(!amount||amount<=0){ alert('กรุณากรอกจำนวนเงินที่ต้องการเติม'); return; }
+  if(!data.cashPockets) data.cashPockets = {};
+  if(!data.topupHistory) data.topupHistory = [];
+  data.cashPockets[cat] = (data.cashPockets[cat]||0) + amount;
+  data.topupHistory.push({
+    category: cat, amount, date: new Date().toISOString(),
+    by: driveState.currentUser ? driveState.currentUser.name : 'Owner'
+  });
+  inp.value = '';
+  save();
+  renderOwnerDashboard();
+  showToast(`เติมเงินสด ฿${fmtBahtShort(amount)} เข้า ${cat} แล้ว ✓`);
 }
 </script>
 </body>
