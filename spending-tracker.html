@@ -659,7 +659,20 @@ var selectedPayment = 'transfer';
     </div>
     <div class="card">
       <div class="card-title">ส่งออกเป็น Excel</div>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">ดาวน์โหลดไฟล์ Excel ที่มีข้อมูลการใช้จ่ายทั้งหมด ประกอบด้วยชีต <strong>ยอดรวมทั้งหมด</strong> และชีตแยกสำหรับแต่ละแผนก</p>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">ดาวน์โหลดไฟล์ Excel พร้อม styles สำหรับทุก sheet</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:12px;color:var(--text2);font-weight:500">ตั้งแต่วันที่</label>
+          <input type="date" id="export-date-from" style="padding:7px 10px;font-size:13px;border:0.5px solid var(--border);border-radius:var(--radius);font-family:inherit" onchange="updateExportInfo()">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:12px;color:var(--text2);font-weight:500">ถึงวันที่</label>
+          <input type="date" id="export-date-to" style="padding:7px 10px;font-size:13px;border:0.5px solid var(--border);border-radius:var(--radius);font-family:inherit" onchange="updateExportInfo()">
+        </div>
+        <button class="btn" onclick="clearExportDates()" style="padding:7px 12px;font-size:12px"><i class="ti ti-x"></i> ล้าง</button>
+        <button class="btn" onclick="setExportThisMonth()" style="padding:7px 12px;font-size:12px"><i class="ti ti-calendar-month"></i> เดือนนี้</button>
+      </div>
+      <div id="export-date-info" style="font-size:12px;color:var(--text2);margin-bottom:12px;min-height:16px"></div>
       <button class="btn btn-primary" onclick="exportExcel()"><i class="ti ti-file-spreadsheet"></i> ดาวน์โหลด Excel (.xlsx)</button>
     </div>
   </div>
@@ -1347,6 +1360,37 @@ function renderExport(){
   document.getElementById('summary-grid').innerHTML=html;
   updateDriveUI(driveState.signedIn);
 }
+function clearExportDates(){
+  document.getElementById('export-date-from').value='';
+  document.getElementById('export-date-to').value='';
+  updateExportInfo();
+}
+function setExportThisMonth(){
+  const now=new Date();
+  const y=now.getFullYear(), m=String(now.getMonth()+1).padStart(2,'0');
+  const lastDay=new Date(y,now.getMonth()+1,0).getDate();
+  document.getElementById('export-date-from').value=`${y}-${m}-01`;
+  document.getElementById('export-date-to').value=`${y}-${m}-${lastDay}`;
+  updateExportInfo();
+}
+function getExportDateRange(){
+  const from=document.getElementById('export-date-from').value;
+  const to=document.getElementById('export-date-to').value;
+  return {from,to};
+}
+function updateExportInfo(){
+  const {from,to}=getExportDateRange();
+  const info=document.getElementById('export-date-info');
+  if(!from&&!to){info.textContent='ไม่ได้กรองวันที่ — ส่งออกข้อมูลทั้งหมด';return;}
+  const filtered=data.entries.filter(e=>{
+    if(e.deleted)return false;
+    if(from&&e.dt<from)return false;
+    if(to&&e.dt>to)return false;
+    return true;
+  });
+  info.textContent=`กรองแล้ว: ${filtered.length} รายการ | ยอดรวม: ${fmtBaht(filtered.reduce((s,e)=>s+e.amount,0))}`;
+}
+
 /* ── Pure-JS Styled Excel Export ── */
 function exportExcel(){
   if(!data.entries.length){alert('ยังไม่มีรายการให้ส่งออก');return;}
@@ -1355,7 +1399,10 @@ function exportExcel(){
     const blob = new Blob([wb], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href=url; a.download='SpendingReport_'+new Date().toISOString().slice(0,10)+'.xlsx';
+    a.href=url;
+    const {from,to}=getExportDateRange();
+    const suffix = from&&to ? `_${from}_to_${to}` : from ? `_from_${from}` : to ? `_to_${to}` : '';
+    a.download=`SpendingReport${suffix}_${new Date().toISOString().slice(0,10)}.xlsx`;
     document.body.appendChild(a); a.click();
     setTimeout(()=>{try{URL.revokeObjectURL(url);a.remove();}catch(x){}},1500);
     showToast('ดาวน์โหลด Excel เรียบร้อย ✓');
@@ -1385,6 +1432,16 @@ function exportCSV(){
    STYLED XLSX BUILDER
    ════════════════════════════════════════ */
 function buildStyledXlsx() {
+  // ── Date filter ──
+  const {from, to} = getExportDateRange();
+  const filterEntry = e => {
+    if(e.deleted) return false;
+    if(from && e.dt < from) return false;
+    if(to && e.dt > to) return false;
+    return true;
+  };
+  const filteredEntries = data.entries.filter(filterEntry);
+  const dateLabel = from||to ? ` (${from||'ทั้งหมด'} ถึง ${to||'ทั้งหมด'})` : '';
   // ── Styles ──
   // xf index: 0=normal, 1=header(dark), 2=header(mid), 3=total, 4=number, 5=cash+, 6=cash-, 7=title, 8=subheader
   const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1442,8 +1499,8 @@ function buildStyledXlsx() {
   /* ── 1. SUMMARY SHEET ── */
   {
     const cats=data.categories||[];
-    const exportDate=new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'long',year:'numeric'});
-    const totalAll=data.entries.filter(e=>!e.deleted).reduce((s,e)=>s+e.amount,0);
+    const exportDate=new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'long',year:'numeric'})+dateLabel;
+    const totalAll=filteredEntries.reduce((s,e)=>s+e.amount,0);
     const totalCash=data.entries.filter(e=>!e.deleted&&e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
     const totalTransfer=data.entries.filter(e=>!e.deleted&&e.paymentMethod!=='cash').reduce((s,e)=>s+e.amount,0);
 
@@ -1459,7 +1516,7 @@ function buildStyledXlsx() {
     // Row 3: KPI headers
     xml+=`<row r="3" ht="22" customHeight="1">${T('A3','รายการทั้งหมด',1)}${T('B3','ยอดรวม (฿)',1)}${T('C3','เงินสด (฿)',1)}${T('D3','โอนเงิน (฿)',1)}${T('E3','จำนวนแผนก',1)}</row>`;
     // Row 4: KPI values
-    xml+=`<row r="4">${N('A4',data.entries.filter(e=>!e.deleted).length,3)}${N('B4',totalAll,3)}${N('C4',totalCash,3)}${N('D4',totalTransfer,3)}${T('E4',cats.length,3)}</row>`;
+    xml+=`<row r="4">${N('A4',filteredEntries.length,3)}${N('B4',totalAll,3)}${N('C4',totalCash,3)}${N('D4',totalTransfer,3)}${T('E4',cats.length,3)}</row>`;
     // Row 5: empty
     xml+=`<row r="5"/>`;
     // Row 6: Per-แผนก header
@@ -1475,7 +1532,7 @@ function buildStyledXlsx() {
       r++;
     });
     // Total row
-    xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'รวมทั้งหมด',3)}${N(`B${r}`,data.entries.filter(e=>!e.deleted).length,3)}${N(`C${r}`,totalAll,3)}${N(`D${r}`,totalCash,3)}${N(`E${r}`,totalTransfer,3)}</row>`;
+    xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'รวมทั้งหมด',3)}${N(`B${r}`,filteredEntries.length,3)}${N(`C${r}`,totalAll,3)}${N(`D${r}`,totalCash,3)}${N(`E${r}`,totalTransfer,3)}</row>`;
     r+=2;
     // Per expense type
     xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'ประเภทค่าใช้จ่าย',2)}${T(`B${r}`,'รายการ',2)}${T(`C${r}`,'ยอดรวม (฿)',2)}</row>`;
@@ -1511,7 +1568,7 @@ function buildStyledXlsx() {
     xml+=`<cols><col min="1" max="1" width="14"/><col min="2" max="2" width="12"/><col min="3" max="3" width="18"/><col min="4" max="4" width="20"/><col min="5" max="5" width="14"/><col min="6" max="6" width="28"/><col min="7" max="7" width="24"/><col min="8" max="8" width="16"/><col min="9" max="9" width="16"/></cols>`;
     xml+='<sheetData>';
     xml+=`<row r="1" ht="22" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}1`,h,1)).join('')}</row>`;
-    const entries=data.entries.filter(e=>!e.deleted);
+    const entries=filteredEntries;
     entries.forEach((e,ri)=>{
       const r=ri+2;
       xml+=`<row r="${r}">
