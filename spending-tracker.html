@@ -519,6 +519,18 @@ var selectedPayment = 'transfer';
             </div>
           </div>
           <div class="form-group full">
+            <label><i class="ti ti-credit-card" style="font-size:12px;margin-right:4px"></i>วิธีชำระเงิน</label>
+            <div class="payment-toggle">
+              <button type="button" class="payment-btn selected-transfer" id="pay-transfer" onclick="selectPayment('transfer')">
+                <i class="ti ti-building-bank"></i> โอนเงิน (Transfer)
+              </button>
+              <button type="button" class="payment-btn" id="pay-cash" onclick="selectPayment('cash')">
+                <i class="ti ti-cash"></i> เงินสด (Cash)
+              </button>
+            </div>
+            <div class="cash-warning" id="cash-pocket-warning"></div>
+          </div>
+          <div class="form-group full">
             <label><i class="ti ti-tag" style="font-size:12px;margin-right:4px"></i>แผนก</label>
             <div class="dept-checkbox-group" id="f-category-checks"></div>
           </div>
