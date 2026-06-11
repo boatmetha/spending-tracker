@@ -2319,6 +2319,10 @@ function changeOwnerPin() {
    OWNER DASHBOARD — CASH POCKETS
    ═══════════════════════════════════════════ */
 function renderOwnerDashboard() {
+  // ensure cashPockets and topupHistory exist
+  if(!data.cashPockets) data.cashPockets = {};
+  if(!data.topupHistory) data.topupHistory = [];
+
   const cats = data.categories || [];
 
   // ── Summary ──
