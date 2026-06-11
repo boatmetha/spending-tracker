@@ -1441,8 +1441,9 @@ function exportExcel(){
       const totalSpend = allEvents.reduce((s,e)=>s+e.spend,0);
       rows.push(['','รวม','','','','',totalTopup,totalSpend,Math.round(running*100)/100,'']);
 
-      // Sheet name: Cat1, Cat2... (ASCII only for xlsx compat)
-      sheets.push({ name:'Cash_Cat'+(idx+1), rows });
+      // Sheet name: use category name (ASCII-safe, max 31 chars)
+      const sheetName = ('Cash_'+cat).replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31) || 'Cash_Cat'+(idx+1);
+      sheets.push({ name:sheetName, rows });
     });
 
     // Build xlsx using SpreadsheetML + JSZip-like manual zip
