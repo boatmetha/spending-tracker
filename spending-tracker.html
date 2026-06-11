@@ -1375,6 +1375,30 @@ function exportExcel(){
       sheets.push({ name: cat, rows: catRows });
     });
 
+    // ── Cash Report sheet ──
+    if(data.cashPockets || (data.topupHistory&&data.topupHistory.length)) {
+      const cashHdr=['แผนก','ยอดคงเหลือ (฿)','เติมรวม (฿)','ใช้ไปรวม (฿)'];
+      const cashRows=[cashHdr];
+      (data.categories||[]).forEach(cat=>{
+        const balance=(data.cashPockets||{})[cat]||0;
+        const topped=(data.topupHistory||[]).filter(h=>h.category===cat).reduce((s,h)=>s+h.amount,0);
+        const spent=data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
+        cashRows.push([cat,balance,topped,spent]);
+      });
+      const totalBal=(data.categories||[]).reduce((s,c)=>s+((data.cashPockets||{})[c]||0),0);
+      const totalTop=(data.topupHistory||[]).reduce((s,h)=>s+h.amount,0);
+      const totalSp=data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
+      cashRows.push(['รวมทั้งหมด',totalBal,totalTop,totalSp]);
+      sheets.push({ name:'CashReport', rows:cashRows });
+
+      // Top-up history sheet
+      const tuHdr=['วันที่','แผนก','จำนวนเติม (฿)','โดย'];
+      const tuRows=[tuHdr,...(data.topupHistory||[]).slice().reverse().map(h=>[
+        h.date?h.date.slice(0,10):'', h.category||'', h.amount||0, h.by||'Owner'
+      ])];
+      sheets.push({ name:'CashTopup', rows:tuRows });
+    }
+
     // Build xlsx using SpreadsheetML + JSZip-like manual zip
     const xlsx = buildXlsx(sheets);
     const blob = new Blob([xlsx], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
@@ -2319,50 +2343,71 @@ function changeOwnerPin() {
    OWNER DASHBOARD — CASH POCKETS
    ═══════════════════════════════════════════ */
 function renderOwnerDashboard() {
-  // ensure cashPockets and topupHistory exist
   if(!data.cashPockets) data.cashPockets = {};
   if(!data.topupHistory) data.topupHistory = [];
-
   const cats = data.categories || [];
 
-  // ── Summary ──
+  // Summary
   const totalPockets = cats.reduce((s,c)=>s+(data.cashPockets[c]||0),0);
   const totalCashSpent = data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
-  let summaryHtml = `
-    <div class="metric"><div class="metric-label">ยอดเงินสดรวมทุกแผนก</div><div class="metric-value" style="color:#1a5276">${fmtBahtShort(totalPockets)}</div></div>
-    <div class="metric"><div class="metric-label">ใช้ไปด้วยเงินสด (รวม)</div><div class="metric-value">${fmtBahtShort(totalCashSpent)}</div></div>`;
-  document.getElementById('owner-summary').innerHTML = summaryHtml;
+  const totalTopup = (data.topupHistory||[]).reduce((s,h)=>s+h.amount,0);
+  document.getElementById('owner-summary').innerHTML = `
+    <div class="metric"><div class="metric-label">ยอดเงินสดคงเหลือรวม</div><div class="metric-value" style="color:#1a5276">${fmtBahtShort(totalPockets)}</div></div>
+    <div class="metric"><div class="metric-label">เติมเงินสดรวมทั้งหมด</div><div class="metric-value">${fmtBahtShort(totalTopup)}</div></div>
+    <div class="metric"><div class="metric-label">ใช้เงินสดรวมทั้งหมด</div><div class="metric-value">${fmtBahtShort(totalCashSpent)}</div></div>`;
 
-  // ── Pocket cards ──
+  // Pocket cards
   let pocketHtml = '';
   cats.forEach(cat => {
-    const balance = data.cashPockets[cat] || 0;
+    const balance = data.cashPockets[cat]||0;
     const spent = data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
-    const isLow = balance < 5000;
+    const topped = (data.topupHistory||[]).filter(h=>h.category===cat).reduce((s,h)=>s+h.amount,0);
+    const isLow = balance>0 && balance<5000;
+    const isEmpty = balance<=0;
     pocketHtml += `<div class="pocket-card">
       <div class="pocket-card-name">${esc(cat)}</div>
-      <div class="pocket-card-balance ${isLow?'low':'ok'}">${fmtBahtShort(balance)}</div>
-      <div class="pocket-card-spent">ใช้ไปแล้ว: ${fmtBahtShort(spent)}</div>
+      <div class="pocket-card-balance ${isEmpty||isLow?'low':'ok'}">${fmtBahtShort(balance)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:6px 0">
+        <div style="font-size:11px;color:var(--text2)">เติมรวม<br><strong style="color:#1a5276">${fmtBahtShort(topped)}</strong></div>
+        <div style="font-size:11px;color:var(--text2)">ใช้ไปรวม<br><strong style="color:var(--red)">${fmtBahtShort(spent)}</strong></div>
+      </div>
+      ${isEmpty?'<div style="font-size:11px;color:var(--red);margin-bottom:6px">&#9888; ยังไม่มียอดเงินสด</div>':isLow?'<div style="font-size:11px;color:#BA7517;margin-bottom:6px">&#9888; ยอดเงินสดใกล้หมด</div>':''}
       <div class="pocket-topup-row">
-        <input type="number" id="topup-${esc(cat)}" placeholder="เติมเงิน..." min="0" step="100">
+        <input type="number" id="topup-${esc(cat)}" placeholder="เติมเงิน (฿)..." min="0" step="100">
         <button class="btn btn-success btn-sm" onclick="topupPocket('${cat.replace(/'/g,"\\'")}')"><i class="ti ti-plus"></i> เติม</button>
       </div>
     </div>`;
   });
-  document.getElementById('pocket-grid').innerHTML = pocketHtml;
+  document.getElementById('pocket-grid').innerHTML = pocketHtml || '<p style="font-size:13px;color:var(--text2)">ยังไม่มีแผนก</p>';
 
-  // ── Top-up history ──
-  const history = (data.topupHistory || []).slice().reverse().slice(0,50);
-  if(!history.length){
-    document.getElementById('topup-history-list').innerHTML = '<p style="font-size:13px;color:var(--text2)">ยังไม่มีประวัติการเติมเงิน</p>';
+  // Combined timeline: topup + cash spending
+  const topupEvents = (data.topupHistory||[]).map(h=>({
+    type:'topup', date:h.date, cat:h.category, amount:h.amount, by:h.by||'Owner', details:''
+  }));
+  const cashEvents = data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).map(e=>({
+    type:'spend', date:e.createdAt||e.dt, cat:e.category, amount:e.amount,
+    by:e.createdBy||'Unknown', details:e.details||e.company||''
+  }));
+  const all = [...topupEvents,...cashEvents].sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  const histEl = document.getElementById('topup-history-list');
+  if(!all.length){
+    histEl.innerHTML='<p style="font-size:13px;color:var(--text2)">ยังไม่มีรายการ</p>';
   } else {
-    document.getElementById('topup-history-list').innerHTML = history.map(h=>`
+    histEl.innerHTML = all.map(ev=>`
       <div class="topup-item">
-        <div>
-          <span style="font-weight:500">${esc(h.category)}</span>
-          <span style="font-size:11px;color:var(--text2);margin-left:8px">${fmtDT(h.date)} โดย ${esc(h.by||'Unknown')}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:18px">${ev.type==='topup'?'&#128176;':'&#128181;'}</span>
+          <div>
+            <span style="font-weight:500">${esc(ev.cat)}</span>
+            <span style="font-size:11px;background:${ev.type==='topup'?'#dbeafe':'#fee2e2'};color:${ev.type==='topup'?'#1a5276':'var(--red)'};padding:1px 7px;border-radius:99px;margin-left:6px">${ev.type==='topup'?'เติมเงิน':'ใช้เงินสด'}</span>
+            ${ev.details?`<span style="font-size:11px;color:var(--text2);margin-left:4px">&middot; ${esc(ev.details)}</span>`:''}
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">${fmtDT(ev.date)} &middot; ${esc(ev.by)}</div>
+          </div>
         </div>
-        <span class="topup-amount">+${fmtBaht(h.amount)}</span>
+        <span style="font-weight:700;white-space:nowrap;color:${ev.type==='topup'?'#1a5276':'var(--red)'}">
+          ${ev.type==='topup'?'+':'-'}${fmtBaht(ev.amount)}
+        </span>
       </div>`).join('');
   }
 }
