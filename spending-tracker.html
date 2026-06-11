@@ -677,6 +677,7 @@ const DB_FILENAME = 'spending-tracker-db.json';
 const DB_FOLDER_NAME = 'SpendingTracker';
 const BACKUP_FOLDER_NAME = 'backups';
 const MAX_BACKUPS = 30; // เก็บ backup สูงสุด 30 ไฟล์
+const SHARED_FILE_ID = '1eXnI_EI3OrjF1kVu-bZUJbntdmAtt9GH'; // Shared DB file ID
 
 /* ═══════════════════════════════════════════
    STATE
@@ -908,12 +909,17 @@ async function syncToDrive(triggeredBy='manual') {
     const body = JSON.stringify(data, null, 2);
 
     // 1. Update / create main DB file
+    // Use shared file ID if set, otherwise search
     if (!driveState.fileId) {
-      const res = await gapi.client.drive.files.list({
-        q: `name='${DB_FILENAME}' and '${folderId}' in parents and trashed=false`,
-        fields: 'files(id)'
-      });
-      if (res.result.files.length) driveState.fileId = res.result.files[0].id;
+      if (SHARED_FILE_ID) {
+        driveState.fileId = SHARED_FILE_ID;
+      } else {
+        const res = await gapi.client.drive.files.list({
+          q: `name='${DB_FILENAME}' and '${folderId}' in parents and trashed=false`,
+          fields: 'files(id)'
+        });
+        if (res.result.files.length) driveState.fileId = res.result.files[0].id;
+      }
     }
     if (driveState.fileId) {
       const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${driveState.fileId}?uploadType=media`, {
@@ -1068,12 +1074,17 @@ async function loadFromDrive() {
   setPillSyncing(true);
   try {
     const folderId = await getOrCreateFolder();
-    const res = await gapi.client.drive.files.list({
-      q: `name='${DB_FILENAME}' and '${folderId}' in parents and trashed=false`,
-      fields: 'files(id,modifiedTime)'
-    });
-    if (!res.result.files.length) { setPillSyncing(false); return; }
-    driveState.fileId = res.result.files[0].id;
+    // Use shared file ID if set
+    if (SHARED_FILE_ID) {
+      driveState.fileId = SHARED_FILE_ID;
+    } else {
+      const res = await gapi.client.drive.files.list({
+        q: `name='${DB_FILENAME}' and '${folderId}' in parents and trashed=false`,
+        fields: 'files(id,modifiedTime)'
+      });
+      if (!res.result.files.length) { setPillSyncing(false); return; }
+      driveState.fileId = res.result.files[0].id;
+    }
     const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${driveState.fileId}?alt=media`, {
       headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}` }
     });
