@@ -1347,298 +1347,295 @@ function renderExport(){
   document.getElementById('summary-grid').innerHTML=html;
   updateDriveUI(driveState.signedIn);
 }
-/* ── Pure-JS Excel export (no external library needed) ──
-   Generates a real .xlsx file using the SpreadsheetML XML format
-   packed into a zip-like structure via base64. Works offline,
-   no CDN dependency, no Thai-encoding bugs.
-*/
+/* ── Pure-JS Styled Excel Export ── */
 function exportExcel(){
   if(!data.entries.length){alert('ยังไม่มีรายการให้ส่งออก');return;}
   try {
-    const sheets = [];
-
-    // Sheet 1: ยอดรวมทั้งหมด
-    const hdr = ['วันที่','ชำระด้วย','จ่ายให้','บริษัท / ร้านค้า','แผนก','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)'];
-    const allRows = [
-      hdr,
-      ...data.entries.map(e=>[
-        e.dt ? e.dt.slice(0,10) : '',
-        e.paymentMethod==='cash'?'Cash':'Transfer',
-        e.transfer || '',
-        e.company || '',
-        e.category || '',
-        e.details || '',
-        e.expenseCat||'',
-        parseFloat(e.amount)||0
-      ]),
-      ['','','','','ยอดรวมทั้งหมด', data.entries.reduce((s,e)=>s+(parseFloat(e.amount)||0),0)]
-    ];
-    sheets.push({ name:'ยอดรวมทั้งหมด', rows: allRows });
-
-    // Per-category sheets — use actual category name
-    data.categories.forEach((cat) => {
-      const rows = data.entries.filter(e=>e.category===cat);
-      if(!rows.length) return;
-      const catRows = [
-        hdr,
-        ...rows.map(e=>[
-          e.dt ? e.dt.slice(0,10) : '',
-          e.transfer||'', e.company||'', e.category||'', e.details||'',
-          parseFloat(e.amount)||0
-        ]),
-        ['','','','','ยอดรวม', rows.reduce((s,e)=>s+(parseFloat(e.amount)||0),0)]
-      ];
-      sheets.push({ name: cat, rows: catRows });
-    });
-
-    // ── Cash Summary sheet ──
-    {
-      const sumHdr=['แผนก','ยอดคงเหลือ (฿)','เติมรวม (฿)','ใช้ไปรวม (฿)'];
-      const sumRows=[sumHdr];
-      (data.categories||[]).forEach(cat=>{
-        const balance=(data.cashPockets||{})[cat]||0;
-        const topped=(data.topupHistory||[]).filter(h=>h.category===cat).reduce((s,h)=>s+h.amount,0);
-        const spent=data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
-        sumRows.push([cat,balance,topped,spent]);
-      });
-      const totalBal=(data.categories||[]).reduce((s,c)=>s+((data.cashPockets||{})[c]||0),0);
-      const totalTop=(data.topupHistory||[]).reduce((s,h)=>s+h.amount,0);
-      const totalSp=data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
-      sumRows.push(['รวมทั้งหมด',totalBal,totalTop,totalSp]);
-      sheets.push({ name:'CashSummary', rows:sumRows });
-    }
-
-    // ── Per-แผนก Cash Detail sheets ──
-    (data.categories||[]).forEach((cat,idx) => {
-      // Combine topup + cash spending for this category, sorted by date
-      const topupEvents = (data.topupHistory||[])
-        .filter(h=>h.category===cat)
-        .map(h=>({ date:h.date, type:'เติมเงิน', transfer:'', company:'', expenseCat:'', details:'เติมเงินสด', topup:h.amount, spend:0, by:h.by||'Owner' }));
-
-      const spendEvents = data.entries
-        .filter(e=>e.category===cat && e.paymentMethod==='cash' && !e.deleted)
-        .map(e=>({ date:e.createdAt||e.dt, type:'ใช้เงินสด', transfer:e.transfer||'', company:e.company||'', expenseCat:e.expenseCat||'', details:e.details||'', topup:0, spend:e.amount, by:e.createdBy||'Unknown' }));
-
-      const allEvents = [...topupEvents,...spendEvents].sort((a,b)=>new Date(a.date)-new Date(b.date));
-
-      if(!allEvents.length) return;
-
-      const hdr=['วันที่','ประเภท','จ่ายให้','บริษัท / ร้านค้า','ประเภทค่าใช้จ่าย','รายละเอียด','เติม (+) ฿','ใช้ (-) ฿','คงเหลือ ฿','บันทึกโดย'];
-      let running = 0;
-      const rows = [hdr];
-      allEvents.forEach(ev=>{
-        running += ev.topup - ev.spend;
-        rows.push([
-          ev.date ? ev.date.slice(0,10) : '',
-          ev.type,
-          ev.transfer,
-          ev.company,
-          ev.expenseCat,
-          ev.details,
-          ev.topup > 0 ? ev.topup : '',
-          ev.spend > 0 ? ev.spend : '',
-          Math.round(running*100)/100,
-          ev.by
-        ]);
-      });
-      // Summary row
-      const totalTopup = allEvents.reduce((s,e)=>s+e.topup,0);
-      const totalSpend = allEvents.reduce((s,e)=>s+e.spend,0);
-      rows.push(['','รวม','','','','',totalTopup,totalSpend,Math.round(running*100)/100,'']);
-
-      // Sheet name: use category name (ASCII-safe, max 31 chars)
-      const sheetName = ('Cash_'+cat).replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31) || 'Cash_Cat'+(idx+1);
-      sheets.push({ name:sheetName, rows });
-    });
-
-    // Build xlsx using SpreadsheetML + JSZip-like manual zip
-    const xlsx = buildXlsx(sheets);
-    const blob = new Blob([xlsx], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const wb = buildStyledXlsx();
+    const blob = new Blob([wb], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = 'spending_' + new Date().toISOString().slice(0,10) + '.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(()=>{ try{URL.revokeObjectURL(url);a.remove();}catch(x){} }, 1500);
+    a.href=url; a.download='SpendingReport_'+new Date().toISOString().slice(0,10)+'.xlsx';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{try{URL.revokeObjectURL(url);a.remove();}catch(x){}},1500);
     showToast('ดาวน์โหลด Excel เรียบร้อย ✓');
-  } catch(err) {
-    console.error('Export error:', err);
-    // Fallback to CSV if xlsx build fails
+  } catch(err){
+    console.error('Export error:',err);
     exportCSV();
   }
 }
 
 function exportCSV(){
-  // Ultimate fallback: plain CSV, always works
-  const hdr = ['วันที่','จ่ายให้','บริษัท / ร้านค้า','แผนก','รายละเอียด','จำนวนเงิน (฿)'];
-  const csvRows = [hdr, ...data.entries.map(e=>[
-    e.dt ? e.dt.slice(0,10) : '',
-    e.transfer||'', e.company||'', e.category||'', e.details||'',
-    parseFloat(e.amount)||0
+  const hdr=['วันที่','ชำระด้วย','จ่ายให้','บริษัท / ร้านค้า','แผนก','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)'];
+  const rows=[hdr,...data.entries.filter(e=>!e.deleted).map(e=>[
+    e.dt?e.dt.slice(0,10):'', e.paymentMethod==='cash'?'Cash':'Transfer',
+    e.transfer||'',e.company||'',e.category||'',e.expenseCat||'',e.details||'',parseFloat(e.amount)||0
   ])];
-  const csv = '\uFEFF' + csvRows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'spending_'+new Date().toISOString().slice(0,10)+'.csv';
-  document.body.appendChild(a); a.click();
-  setTimeout(()=>{ try{URL.revokeObjectURL(url);a.remove();}catch(x){} }, 1500);
-  showToast('ดาวน์โหลดเป็น CSV แทน (xlsx ไม่พร้อม)');
+  const csv='\uFEFF'+rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='spending_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{try{URL.revokeObjectURL(url);a.remove();}catch(x){}},1500);
+  showToast('ดาวน์โหลดเป็น CSV แทน');
 }
 
-/* Build a real .xlsx (OOXML) without any library */
-function buildXlsx(sheets) {
-  function xmlEsc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+/* ════════════════════════════════════════
+   STYLED XLSX BUILDER
+   ════════════════════════════════════════ */
+function buildStyledXlsx() {
+  // ── Styles ──
+  // xf index: 0=normal, 1=header(dark), 2=header(mid), 3=total, 4=number, 5=cash+, 6=cash-, 7=title, 8=subheader
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="5">
+    <font><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+    <font><b/><sz val="14"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><color rgb="FF1A5276"/><name val="Calibri"/></font>
+  </fonts>
+  <fills count="7">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1A3A5C"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF2E75B6"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F1"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFE2EFDA"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFFCE4D6"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FFB8CCE4"/></left>
+      <right style="thin"><color rgb="FFB8CCE4"/></right>
+      <top style="thin"><color rgb="FFB8CCE4"/></top>
+      <bottom style="thin"><color rgb="FFB8CCE4"/></bottom>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="9">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="4"  fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="4"  fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="4"  fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="4"  fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment wrapText="0"/></xf>
+  </cellXfs>
+</styleSheet>`;
 
-  // Shared strings table
-  const strMap = {}, strs = [];
-  function si(v){
-    const k = String(v);
-    if(k in strMap) return strMap[k];
-    strMap[k] = strs.length;
-    strs.push(k);
-    return strs.length-1;
+  const xmlEsc = s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const strMap={},strs=[];
+  const si=v=>{const k=String(v);if(k in strMap)return strMap[k];strMap[k]=strs.length;strs.push(k);return strs.length-1;};
+  const S=(v,s=0)=>`<c r="${v}" s="${s}" t="s"><v>${si('')}</v></c>`; // empty styled
+  const T=(addr,val,s=8)=>`<c r="${addr}" s="${s}" t="s"><v>${si(String(val))}</v></c>`;
+  const N=(addr,val,s=4)=>`<c r="${addr}" s="${s}"><v>${parseFloat(val)||0}</v></c>`;
+  const col=n=>{let s='';n++;while(n>0){s=String.fromCharCode(64+(n%26||26))+s;n=Math.floor((n-1)/26);}return s;};
+
+  const sheetXmls=[];
+  const sheetNames=[];
+
+  /* ── 1. SUMMARY SHEET ── */
+  {
+    const cats=data.categories||[];
+    const exportDate=new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'long',year:'numeric'});
+    const totalAll=data.entries.filter(e=>!e.deleted).reduce((s,e)=>s+e.amount,0);
+    const totalCash=data.entries.filter(e=>!e.deleted&&e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
+    const totalTransfer=data.entries.filter(e=>!e.deleted&&e.paymentMethod!=='cash').reduce((s,e)=>s+e.amount,0);
+
+    let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    // col widths
+    xml+=`<cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="2" width="18" customWidth="1"/><col min="3" max="3" width="18" customWidth="1"/><col min="4" max="4" width="18" customWidth="1"/><col min="5" max="5" width="18" customWidth="1"/></cols>`;
+    xml+='<sheetData>';
+
+    // Row 1: Title
+    xml+=`<row r="1" ht="30" customHeight="1">${T('A1','📊 รายงานสรุปการใช้จ่าย — '+exportDate,7)}</row>`;
+    // Row 2: empty
+    xml+=`<row r="2"/>`;
+    // Row 3: KPI headers
+    xml+=`<row r="3" ht="22" customHeight="1">${T('A3','รายการทั้งหมด',1)}${T('B3','ยอดรวม (฿)',1)}${T('C3','เงินสด (฿)',1)}${T('D3','โอนเงิน (฿)',1)}${T('E3','จำนวนแผนก',1)}</row>`;
+    // Row 4: KPI values
+    xml+=`<row r="4">${N('A4',data.entries.filter(e=>!e.deleted).length,3)}${N('B4',totalAll,3)}${N('C4',totalCash,3)}${N('D4',totalTransfer,3)}${T('E4',cats.length,3)}</row>`;
+    // Row 5: empty
+    xml+=`<row r="5"/>`;
+    // Row 6: Per-แผนก header
+    xml+=`<row r="6" ht="20" customHeight="1">${T('A6','แผนก',2)}${T('B6','รายการ',2)}${T('C6','ยอดรวม (฿)',2)}${T('D6','เงินสด (฿)',2)}${T('E6','โอนเงิน (฿)',2)}</row>`;
+    // Per-แผนก rows
+    let r=7;
+    cats.forEach(cat=>{
+      const ents=data.entries.filter(e=>!e.deleted&&e.category===cat);
+      const tot=ents.reduce((s,e)=>s+e.amount,0);
+      const cash=ents.filter(e=>e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
+      const tr=ents.filter(e=>e.paymentMethod!=='cash').reduce((s,e)=>s+e.amount,0);
+      xml+=`<row r="${r}">${T(`A${r}`,cat,8)}${N(`B${r}`,ents.length,4)}${N(`C${r}`,tot,4)}${N(`D${r}`,cash,4)}${N(`E${r}`,tr,4)}</row>`;
+      r++;
+    });
+    // Total row
+    xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'รวมทั้งหมด',3)}${N(`B${r}`,data.entries.filter(e=>!e.deleted).length,3)}${N(`C${r}`,totalAll,3)}${N(`D${r}`,totalCash,3)}${N(`E${r}`,totalTransfer,3)}</row>`;
+    r+=2;
+    // Per expense type
+    xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'ประเภทค่าใช้จ่าย',2)}${T(`B${r}`,'รายการ',2)}${T(`C${r}`,'ยอดรวม (฿)',2)}</row>`;
+    r++;
+    const expTypes=['ต้นทุนขาย (Cost of Goods Sold)','ค่าแรงงาน (Labor)','ค่าสาธารณูปโภค (Utilities)','ค่าเช่า (Rent)','การตลาด (Marketing)','อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)','ค่าใช้จ่ายทั่วไป (General & Admin)'];
+    expTypes.forEach(et=>{
+      const ents=data.entries.filter(e=>!e.deleted&&e.expenseCat===et);
+      if(!ents.length)return;
+      xml+=`<row r="${r}">${T(`A${r}`,et,8)}${N(`B${r}`,ents.length,4)}${N(`C${r}`,ents.reduce((s,e)=>s+e.amount,0),4)}</row>`;
+      r++;
+    });
+    // Cash pocket summary
+    r+=1;
+    xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'กระเป๋าเงินสด',2)}${T(`B${r}`,'ยอดคงเหลือ (฿)',2)}${T(`C${r}`,'เติมรวม (฿)',2)}${T(`D${r}`,'ใช้ไปรวม (฿)',2)}</row>`;
+    r++;
+    cats.forEach(cat=>{
+      const bal=(data.cashPockets||{})[cat]||0;
+      const topped=(data.topupHistory||[]).filter(h=>h.category===cat).reduce((s,h)=>s+h.amount,0);
+      const spent=data.entries.filter(e=>!e.deleted&&e.category===cat&&e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
+      xml+=`<row r="${r}">${T(`A${r}`,cat,8)}${N(`B${r}`,bal,5)}${N(`C${r}`,topped,4)}${N(`D${r}`,spent,6)}</row>`;
+      r++;
+    });
+
+    xml+='</sheetData></worksheet>';
+    sheetXmls.push(xml);
+    sheetNames.push('📊 Summary');
   }
 
-  // Build sheet XML
-  const sheetXmls = sheets.map(({rows})=>{
-    let xml = '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
-    rows.forEach((row, ri)=>{
-      xml += `<row r="${ri+1}">`;
-      row.forEach((cell, ci)=>{
-        const col = colName(ci);
-        const addr = col+(ri+1);
-        if(typeof cell === 'number'){
-          xml += `<c r="${addr}"><v>${cell}</v></c>`;
-        } else {
-          const idx = si(cell);
-          xml += `<c r="${addr}" t="s"><v>${idx}</v></c>`;
-        }
-      });
-      xml += '</row>';
+  /* ── 2. DETAIL SHEET (all transactions) ── */
+  {
+    const hdr=['วันที่','ชำระด้วย','จ่ายให้','บริษัท / ร้านค้า','แผนก','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)','บันทึกโดย'];
+    let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml+=`<cols><col min="1" max="1" width="14"/><col min="2" max="2" width="12"/><col min="3" max="3" width="18"/><col min="4" max="4" width="20"/><col min="5" max="5" width="14"/><col min="6" max="6" width="28"/><col min="7" max="7" width="24"/><col min="8" max="8" width="16"/><col min="9" max="9" width="16"/></cols>`;
+    xml+='<sheetData>';
+    xml+=`<row r="1" ht="22" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}1`,h,1)).join('')}</row>`;
+    const entries=data.entries.filter(e=>!e.deleted);
+    entries.forEach((e,ri)=>{
+      const r=ri+2;
+      xml+=`<row r="${r}">
+        ${T(`A${r}`,e.dt?e.dt.slice(0,10):'',8)}
+        ${T(`B${r}`,e.paymentMethod==='cash'?'💵 Cash':'🏦 Transfer',8)}
+        ${T(`C${r}`,e.transfer||'',8)}
+        ${T(`D${r}`,e.company||'',8)}
+        ${T(`E${r}`,e.category||'',8)}
+        ${T(`F${r}`,e.expenseCat||'',8)}
+        ${T(`G${r}`,e.details||'',8)}
+        ${N(`H${r}`,e.amount,4)}
+        ${T(`I${r}`,e.createdBy||'',8)}
+      </row>`;
     });
-    xml += '</sheetData></worksheet>';
-    return xml;
+    const total=entries.reduce((s,e)=>s+e.amount,0);
+    const lastR=entries.length+2;
+    xml+=`<row r="${lastR}">${T(`A${lastR}`,'',3)}${T(`B${lastR}`,'',3)}${T(`C${lastR}`,'',3)}${T(`D${lastR}`,'',3)}${T(`E${lastR}`,'',3)}${T(`F${lastR}`,'',3)}${T(`G${lastR}`,'ยอดรวม',3)}${N(`H${lastR}`,total,3)}${T(`I${lastR}`,'',3)}</row>`;
+    xml+='</sheetData></worksheet>';
+    sheetXmls.push(xml);
+    sheetNames.push('All Transactions');
+  }
+
+  /* ── 3. PER-แผนก SHEETS ── */
+  (data.categories||[]).forEach(cat=>{
+    const entries=data.entries.filter(e=>!e.deleted&&e.category===cat);
+    if(!entries.length)return;
+    const hdr=['วันที่','ชำระด้วย','จ่ายให้','บริษัท / ร้านค้า','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)','บันทึกโดย'];
+    let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml+=`<cols><col min="1" max="1" width="14"/><col min="2" max="2" width="14"/><col min="3" max="3" width="18"/><col min="4" max="4" width="20"/><col min="5" max="5" width="28"/><col min="6" max="6" width="24"/><col min="7" max="7" width="16"/><col min="8" max="8" width="16"/></cols>`;
+    xml+='<sheetData>';
+    // Title row
+    xml+=`<row r="1" ht="28" customHeight="1">${T('A1','💼 รายงาน — '+cat,7)}</row>`;
+    xml+=`<row r="2"/>`;
+    xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+    entries.forEach((e,ri)=>{
+      const r=ri+4;
+      const isCash=e.paymentMethod==='cash';
+      const ns=isCash?6:4; // red bg for cash spend
+      xml+=`<row r="${r}">
+        ${T(`A${r}`,e.dt?e.dt.slice(0,10):'',8)}
+        ${T(`B${r}`,isCash?'💵 Cash':'🏦 Transfer',8)}
+        ${T(`C${r}`,e.transfer||'',8)}
+        ${T(`D${r}`,e.company||'',8)}
+        ${T(`E${r}`,e.expenseCat||'',8)}
+        ${T(`F${r}`,e.details||'',8)}
+        ${N(`G${r}`,e.amount,ns)}
+        ${T(`H${r}`,e.createdBy||'',8)}
+      </row>`;
+    });
+    const total=entries.reduce((s,e)=>s+e.amount,0);
+    const cash=entries.filter(e=>e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
+    const tr=entries.filter(e=>e.paymentMethod!=='cash').reduce((s,e)=>s+e.amount,0);
+    const lr=entries.length+4;
+    xml+=`<row r="${lr}">${T(`A${lr}`,'',3)}${T(`B${lr}`,'',3)}${T(`C${lr}`,'',3)}${T(`D${lr}`,'',3)}${T(`E${lr}`,'',3)}${T(`F${lr}`,'ยอดรวม',3)}${N(`G${lr}`,total,3)}${T(`H${lr}`,'',3)}</row>`;
+    xml+=`<row r="${lr+1}">${T(`A${lr+1}`,'',3)}${T(`B${lr+1}`,'',3)}${T(`C${lr+1}`,'',3)}${T(`D${lr+1}`,'',3)}${T(`E${lr+1}`,'',3)}${T(`F${lr+1}`,'เงินสด',3)}${N(`G${lr+1}`,cash,3)}${T(`H${lr+1}`,'',3)}</row>`;
+    xml+=`<row r="${lr+2}">${T(`A${lr+2}`,'',3)}${T(`B${lr+2}`,'',3)}${T(`C${lr+2}`,'',3)}${T(`D${lr+2}`,'',3)}${T(`E${lr+2}`,'',3)}${T(`F${lr+2}`,'โอนเงิน',3)}${N(`G${lr+2}`,tr,3)}${T(`H${lr+2}`,'',3)}</row>`;
+    xml+='</sheetData></worksheet>';
+    sheetXmls.push(xml);
+    sheetNames.push(cat.replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Sheet');
   });
 
-  // Shared strings XML
-  const ssXml = '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'+strs.length+'" uniqueCount="'+strs.length+'">'
-    + strs.map(s=>'<si><t xml:space="preserve">'+xmlEsc(s)+'</t></si>').join('') + '</sst>';
+  /* ── 4. CASH DETAIL PER-แผนก SHEETS ── */
+  (data.categories||[]).forEach((cat,idx)=>{
+    const topupEvts=(data.topupHistory||[]).filter(h=>h.category===cat)
+      .map(h=>({date:h.date,type:'เติมเงิน',transfer:'',company:'',expenseCat:'',details:'เติมเงินสด',topup:h.amount,spend:0,by:h.by||'Owner'}));
+    const spendEvts=data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted)
+      .map(e=>({date:e.createdAt||e.dt,type:'ใช้เงินสด',transfer:e.transfer||'',company:e.company||'',expenseCat:e.expenseCat||'',details:e.details||'',topup:0,spend:e.amount,by:e.createdBy||'Unknown'}));
+    const all=[...topupEvts,...spendEvts].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    if(!all.length)return;
 
-  // Workbook XML
-  const wbXml = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
-    + sheets.map((s,i)=>`<sheet name="${xmlEsc(s.name)}" sheetId="${i+1}" r:id="rId${i+2}"/>`).join('')+'</sheets></workbook>';
+    let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml+=`<cols><col min="1" max="1" width="14"/><col min="2" max="2" width="14"/><col min="3" max="3" width="18"/><col min="4" max="4" width="20"/><col min="5" max="5" width="26"/><col min="6" max="6" width="22"/><col min="7" max="7" width="15"/><col min="8" max="8" width="15"/><col min="9" max="9" width="15"/><col min="10" max="10" width="16"/></cols>`;
+    xml+='<sheetData>';
+    xml+=`<row r="1" ht="28" customHeight="1">${T('A1','💵 Cash Ledger — '+cat,7)}</row>`;
+    xml+=`<row r="2"/>`;
+    const hdr=['วันที่','ประเภท','จ่ายให้','บริษัท / ร้านค้า','ประเภทค่าใช้จ่าย','รายละเอียด','เติม (+) ฿','ใช้ (-) ฿','คงเหลือ ฿','บันทึกโดย'];
+    xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+    let running=0;
+    all.forEach((ev,ri)=>{
+      const r=ri+4;
+      running+=ev.topup-ev.spend;
+      const ts=ev.type==='เติมเงิน'?5:6;
+      xml+=`<row r="${r}">
+        ${T(`A${r}`,ev.date?ev.date.slice(0,10):'',8)}
+        ${T(`B${r}`,ev.type,8)}
+        ${T(`C${r}`,ev.transfer,8)}
+        ${T(`D${r}`,ev.company,8)}
+        ${T(`E${r}`,ev.expenseCat,8)}
+        ${T(`F${r}`,ev.details,8)}
+        ${ev.topup>0?N(`G${r}`,ev.topup,ts):T(`G${r}`,'',8)}
+        ${ev.spend>0?N(`H${r}`,ev.spend,ts):T(`H${r}`,'',8)}
+        ${N(`I${r}`,Math.round(running*100)/100,ev.type==='เติมเงิน'?5:4)}
+        ${T(`J${r}`,ev.by,8)}
+      </row>`;
+    });
+    const lr=all.length+4;
+    const tt=all.reduce((s,e)=>s+e.topup,0);
+    const ts2=all.reduce((s,e)=>s+e.spend,0);
+    xml+=`<row r="${lr}">${T(`A${lr}`,'',3)}${T(`B${lr}`,'',3)}${T(`C${lr}`,'',3)}${T(`D${lr}`,'',3)}${T(`E${lr}`,'',3)}${T(`F${lr}`,'รวม',3)}${N(`G${lr}`,tt,3)}${N(`H${lr}`,ts2,3)}${N(`I${lr}`,Math.round(running*100)/100,3)}${T(`J${lr}`,'',3)}</row>`;
+    xml+='</sheetData></worksheet>';
+    sheetXmls.push(xml);
+    sheetNames.push(('Cash_'+cat).replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Cash'+(idx+1));
+  });
 
-  // Relationships
-  const wbRels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
-    + sheets.map((_,i)=>`<Relationship Id="rId${i+2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')
-    + '</Relationships>';
+  /* ── Build OOXML zip ── */
+  const ssXml='<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'+strs.length+'" uniqueCount="'+strs.length+'">'+strs.map(s=>'<si><t xml:space="preserve">'+xmlEsc(s)+'</t></si>').join('')+'</sst>';
+  const wbXml='<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheetNames.map((n,i)=>`<sheet name="${xmlEsc(n)}" sheetId="${i+1}" r:id="rId${i+2}"/>`).join('')+'</sheets></workbook>';
+  const wbRels='<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId_styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'+sheetNames.map((_,i)=>`<Relationship Id="rId${i+2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+'</Relationships>';
+  const rootRels='<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+  const ct='<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheetNames.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>';
 
-  const rootRels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
-
-  const contentTypes = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-    +'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-    +'<Default Extension="xml" ContentType="application/xml"/>'
-    +'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-    +'<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
-    + sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')
-    +'</Types>';
-
-  // Zip it
-  const files = [
-    ['[Content_Types].xml', contentTypes],
-    ['_rels/.rels', rootRels],
-    ['xl/workbook.xml', wbXml],
-    ['xl/_rels/workbook.xml.rels', wbRels],
-    ['xl/sharedStrings.xml', ssXml],
-    ...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml', xml])
+  const files=[
+    ['[Content_Types].xml',ct],
+    ['_rels/.rels',rootRels],
+    ['xl/workbook.xml',wbXml],
+    ['xl/_rels/workbook.xml.rels',wbRels],
+    ['xl/sharedStrings.xml',ssXml],
+    ['xl/styles.xml',stylesXml],
+    ...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',xml])
   ];
   return zipFiles(files);
 }
 
-function colName(n){ let s=''; n++; while(n>0){s=String.fromCharCode(64+(n%26||26))+s; n=Math.floor((n-1)/26);} return s; }
 
-/* Minimal ZIP builder (DEFLATE-store, no compression needed for xlsx) */
-function zipFiles(files){
-  const enc = new TextEncoder();
-  const parts = [];
-  const centralDir = [];
-  let offset = 0;
-
-  files.forEach(([name, content])=>{
-    const nameBytes = enc.encode(name);
-    const dataBytes = typeof content === 'string' ? enc.encode(content) : content;
-    const crc = crc32(dataBytes);
-    const local = new Uint8Array(30 + nameBytes.length + dataBytes.length);
-    const dv = new DataView(local.buffer);
-    dv.setUint32(0, 0x04034b50, true); // local file header sig
-    dv.setUint16(4, 20, true);  // version needed
-    dv.setUint16(6, 0, true);   // flags
-    dv.setUint16(8, 0, true);   // compression: store
-    dv.setUint16(10, 0, true);  // mod time
-    dv.setUint16(12, 0, true);  // mod date
-    dv.setUint32(14, crc, true);
-    dv.setUint32(18, dataBytes.length, true);
-    dv.setUint32(22, dataBytes.length, true);
-    dv.setUint16(26, nameBytes.length, true);
-    dv.setUint16(28, 0, true);
-    local.set(nameBytes, 30);
-    local.set(dataBytes, 30 + nameBytes.length);
-
-    const cd = new Uint8Array(46 + nameBytes.length);
-    const cdv = new DataView(cd.buffer);
-    cdv.setUint32(0, 0x02014b50, true);
-    cdv.setUint16(4, 20, true); cdv.setUint16(6, 20, true);
-    cdv.setUint16(8, 0, true); cdv.setUint16(10, 0, true);
-    cdv.setUint16(12, 0, true); cdv.setUint16(14, 0, true);
-    cdv.setUint32(16, crc, true);
-    cdv.setUint32(20, dataBytes.length, true);
-    cdv.setUint32(24, dataBytes.length, true);
-    cdv.setUint16(28, nameBytes.length, true);
-    cdv.setUint16(30, 0, true); cdv.setUint16(32, 0, true);
-    cdv.setUint16(34, 0, true); cdv.setUint16(36, 0, true);
-    cdv.setUint32(38, 0, true);
-    cdv.setUint32(42, offset, true);
-    cd.set(nameBytes, 46);
-
-    parts.push(local);
-    centralDir.push(cd);
-    offset += local.length;
-  });
-
-  const cdBytes = concat(centralDir);
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(4, 0, true); ev.setUint16(6, 0, true);
-  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
-  ev.setUint32(12, cdBytes.length, true);
-  ev.setUint32(16, offset, true);
-  ev.setUint16(20, 0, true);
-
-  return concat([...parts, cdBytes, eocd]);
-}
-
-function concat(arrays){
-  const total = arrays.reduce((s,a)=>s+a.length, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  arrays.forEach(a=>{ out.set(a, off); off+=a.length; });
-  return out;
-}
-
-function crc32(buf){
-  let c = 0xFFFFFFFF;
-  const t = crc32.table || (()=>{
-    crc32.table = new Uint32Array(256);
-    for(let i=0;i<256;i++){ let v=i; for(let j=0;j<8;j++) v=v&1?(0xEDB88320^(v>>>1)):v>>>1; crc32.table[i]=v; }
-    return crc32.table;
-  })();
-  for(let i=0;i<buf.length;i++) c=t[(c^buf[i])&0xFF]^(c>>>8);
-  return (c^0xFFFFFFFF)>>>0;
-}
 
 /* ═══════════════════════════════════════════
    TOAST
