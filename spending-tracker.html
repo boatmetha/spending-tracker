@@ -1350,11 +1350,12 @@ function deleteCategory(name){
    EXPORT
    ═══════════════════════════════════════════ */
 function renderExport(){
-  const total=data.entries.reduce((s,e)=>s+e.amount,0);
+  const active = data.entries.filter(e=>!e.deleted);
+  const total=active.reduce((s,e)=>s+e.amount,0);
   let html=`<div class="metric"><div class="metric-label">ยอดรวมทั้งหมด</div><div class="metric-value">${fmtBahtShort(total)}</div></div>`;
-  html+=`<div class="metric"><div class="metric-label">จำนวนรายการ</div><div class="metric-value">${data.entries.length} รายการ</div></div>`;
+  html+=`<div class="metric"><div class="metric-label">จำนวนรายการ</div><div class="metric-value">${active.length} รายการ</div></div>`;
   data.categories.forEach(c=>{
-    const v=data.entries.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0);
+    const v=active.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0);
     html+=`<div class="metric"><div class="metric-label">${esc(c)}</div><div class="metric-value">${fmtBahtShort(v)}</div></div>`;
   });
   document.getElementById('summary-grid').innerHTML=html;
