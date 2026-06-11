@@ -1252,6 +1252,11 @@ function deleteEntry(id){
   e.deleted=true;
   e.deletedBy=driveState.currentUser?driveState.currentUser.name:'Unknown';
   e.deletedAt=new Date().toISOString();
+  // คืนเงินสดกลับกระเป๋าถ้าจ่ายด้วย Cash
+  if(e.paymentMethod==='cash' && e.category){
+    if(!data.cashPockets) data.cashPockets={};
+    data.cashPockets[e.category] = (data.cashPockets[e.category]||0) + e.amount;
+  }
   save(); renderRecords();
   if(document.getElementById('tab-export').style.display!=='none') renderExport();
 }
