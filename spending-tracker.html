@@ -1386,29 +1386,64 @@ function exportExcel(){
       sheets.push({ name: cat, rows: catRows });
     });
 
-    // ── Cash Report sheet ──
-    if(data.cashPockets || (data.topupHistory&&data.topupHistory.length)) {
-      const cashHdr=['แผนก','ยอดคงเหลือ (฿)','เติมรวม (฿)','ใช้ไปรวม (฿)'];
-      const cashRows=[cashHdr];
+    // ── Cash Summary sheet ──
+    {
+      const sumHdr=['แผนก','ยอดคงเหลือ (฿)','เติมรวม (฿)','ใช้ไปรวม (฿)'];
+      const sumRows=[sumHdr];
       (data.categories||[]).forEach(cat=>{
         const balance=(data.cashPockets||{})[cat]||0;
         const topped=(data.topupHistory||[]).filter(h=>h.category===cat).reduce((s,h)=>s+h.amount,0);
         const spent=data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
-        cashRows.push([cat,balance,topped,spent]);
+        sumRows.push([cat,balance,topped,spent]);
       });
       const totalBal=(data.categories||[]).reduce((s,c)=>s+((data.cashPockets||{})[c]||0),0);
       const totalTop=(data.topupHistory||[]).reduce((s,h)=>s+h.amount,0);
       const totalSp=data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
-      cashRows.push(['รวมทั้งหมด',totalBal,totalTop,totalSp]);
-      sheets.push({ name:'CashReport', rows:cashRows });
-
-      // Top-up history sheet
-      const tuHdr=['วันที่','แผนก','จำนวนเติม (฿)','โดย'];
-      const tuRows=[tuHdr,...(data.topupHistory||[]).slice().reverse().map(h=>[
-        h.date?h.date.slice(0,10):'', h.category||'', h.amount||0, h.by||'Owner'
-      ])];
-      sheets.push({ name:'CashTopup', rows:tuRows });
+      sumRows.push(['รวมทั้งหมด',totalBal,totalTop,totalSp]);
+      sheets.push({ name:'CashSummary', rows:sumRows });
     }
+
+    // ── Per-แผนก Cash Detail sheets ──
+    (data.categories||[]).forEach((cat,idx) => {
+      // Combine topup + cash spending for this category, sorted by date
+      const topupEvents = (data.topupHistory||[])
+        .filter(h=>h.category===cat)
+        .map(h=>({ date:h.date, type:'เติมเงิน', transfer:'', company:'', expenseCat:'', details:'เติมเงินสด', topup:h.amount, spend:0, by:h.by||'Owner' }));
+
+      const spendEvents = data.entries
+        .filter(e=>e.category===cat && e.paymentMethod==='cash' && !e.deleted)
+        .map(e=>({ date:e.createdAt||e.dt, type:'ใช้เงินสด', transfer:e.transfer||'', company:e.company||'', expenseCat:e.expenseCat||'', details:e.details||'', topup:0, spend:e.amount, by:e.createdBy||'Unknown' }));
+
+      const allEvents = [...topupEvents,...spendEvents].sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+      if(!allEvents.length) return;
+
+      const hdr=['วันที่','ประเภท','จ่ายให้','บริษัท / ร้านค้า','ประเภทค่าใช้จ่าย','รายละเอียด','เติม (+) ฿','ใช้ (-) ฿','คงเหลือ ฿','บันทึกโดย'];
+      let running = 0;
+      const rows = [hdr];
+      allEvents.forEach(ev=>{
+        running += ev.topup - ev.spend;
+        rows.push([
+          ev.date ? ev.date.slice(0,10) : '',
+          ev.type,
+          ev.transfer,
+          ev.company,
+          ev.expenseCat,
+          ev.details,
+          ev.topup > 0 ? ev.topup : '',
+          ev.spend > 0 ? ev.spend : '',
+          Math.round(running*100)/100,
+          ev.by
+        ]);
+      });
+      // Summary row
+      const totalTopup = allEvents.reduce((s,e)=>s+e.topup,0);
+      const totalSpend = allEvents.reduce((s,e)=>s+e.spend,0);
+      rows.push(['','รวม','','','','',totalTopup,totalSpend,Math.round(running*100)/100,'']);
+
+      // Sheet name: Cat1, Cat2... (ASCII only for xlsx compat)
+      sheets.push({ name:'Cash_Cat'+(idx+1), rows });
+    });
 
     // Build xlsx using SpreadsheetML + JSZip-like manual zip
     const xlsx = buildXlsx(sheets);
