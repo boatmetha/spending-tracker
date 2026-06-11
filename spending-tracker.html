@@ -2534,6 +2534,7 @@ function renderOwnerDashboard() {
       </div>
       ${isEmpty?'<div style="font-size:11px;color:var(--red);margin-bottom:6px">&#9888; ยังไม่มียอดเงินสด</div>':isLow?'<div style="font-size:11px;color:#BA7517;margin-bottom:6px">&#9888; ยอดเงินสดใกล้หมด</div>':''}
       <div class="pocket-topup-row">
+        <input type="date" id="topup-date-${esc(cat)}" value="${new Date().toISOString().slice(0,10)}" style="width:140px;flex-shrink:0">
         <input type="number" id="topup-${esc(cat)}" placeholder="เติมเงิน (฿)..." min="0" step="100">
         <button class="btn btn-success btn-sm" onclick="topupPocket('${cat.replace(/'/g,"\\'")}')"><i class="ti ti-plus"></i> เติม</button>
       </div>
@@ -2575,19 +2576,21 @@ function renderOwnerDashboard() {
 
 function topupPocket(cat) {
   const inp = document.getElementById('topup-'+cat);
+  const dateInp = document.getElementById('topup-date-'+cat);
   const amount = parseFloat(inp.value);
   if(!amount||amount<=0){ alert('กรุณากรอกจำนวนเงินที่ต้องการเติม'); return; }
+  const topupDate = (dateInp && dateInp.value) ? dateInp.value : new Date().toISOString().slice(0,10);
   if(!data.cashPockets) data.cashPockets = {};
   if(!data.topupHistory) data.topupHistory = [];
   data.cashPockets[cat] = (data.cashPockets[cat]||0) + amount;
   data.topupHistory.push({
-    category: cat, amount, date: new Date().toISOString(),
+    category: cat, amount, date: topupDate+'T00:00:00.000Z',
     by: driveState.currentUser ? driveState.currentUser.name : 'Owner'
   });
   inp.value = '';
   save();
   renderOwnerDashboard();
-  showToast(`เติมเงินสด ฿${fmtBahtShort(amount)} เข้า ${cat} แล้ว ✓`);
+  showToast(`เติมเงินสด ฿${fmtBahtShort(amount)} เข้า ${cat} วันที่ ${topupDate} ✓`);
 }
 </script>
 </body>
