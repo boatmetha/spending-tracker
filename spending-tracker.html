@@ -289,8 +289,13 @@ var selectedPayment = 'transfer';
   .pocket-card-balance.low { color:var(--red); }
   .pocket-card-balance.ok { color:#1a5276; }
   .pocket-card-spent { font-size:12px; color:var(--text2); }
-  .pocket-topup-row { display:flex; gap:8px; margin-top:10px; }
-  .pocket-topup-row input { flex:1; padding:6px 8px; font-size:13px; }
+  .pocket-topup-row { display:flex; flex-direction:column; gap:6px; margin-top:10px; }
+  .pocket-topup-row .topup-date-row { display:flex; align-items:center; gap:6px; }
+  .pocket-topup-row .topup-date-row label { font-size:11px; color:var(--text2); white-space:nowrap; }
+  .pocket-topup-row .topup-amount-row { display:flex; gap:6px; }
+  .pocket-topup-row input[type="date"] { flex:1; padding:6px 8px; font-size:12px; }
+  .pocket-topup-row input[type="number"] { flex:1 1 auto; min-width:0; padding:6px 8px; font-size:13px; }
+  .pocket-topup-row .topup-amount-row .btn { flex-shrink:0; white-space:nowrap; }
   .topup-history { margin-top:1rem; }
   .topup-history-title { font-size:11px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px; }
   .topup-item { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:0.5px solid var(--border); font-size:13px; }
@@ -662,6 +667,9 @@ var selectedPayment = 'transfer';
       <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">ดาวน์โหลดไฟล์ Excel พร้อม styles สำหรับทุก sheet</p>
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
         <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:12px;color:var(--text2);font-weight:500">เลือกเดือน</label>
+          <select id="export-month-select" onchange="setExportMonth(this.value)" style="padding:7px 10px;font-size:13px;font-family:inherit"></select>
+        </div>
           <label style="font-size:12px;color:var(--text2);font-weight:500">ตั้งแต่วันที่</label>
           <input type="date" id="export-date-from" style="padding:7px 10px;font-size:13px;border:0.5px solid var(--border);border-radius:var(--radius);font-family:inherit" onchange="updateExportInfo()">
         </div>
@@ -1350,6 +1358,7 @@ function deleteCategory(name){
    EXPORT
    ═══════════════════════════════════════════ */
 function renderExport(){
+  populateExportMonthSelect();
   const active = data.entries.filter(e=>!e.deleted);
   const total=active.reduce((s,e)=>s+e.amount,0);
   let html=`<div class="metric"><div class="metric-label">ยอดรวมทั้งหมด</div><div class="metric-value">${fmtBahtShort(total)}</div></div>`;
@@ -1361,9 +1370,53 @@ function renderExport(){
   document.getElementById('summary-grid').innerHTML=html;
   updateDriveUI(driveState.signedIn);
 }
+const THAI_MONTH_NAMES = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+const ENG_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function populateExportMonthSelect(){
+  const sel = document.getElementById('export-month-select');
+  if(!sel) return;
+  // find earliest and latest entry dates
+  const dates = data.entries.filter(e=>!e.deleted && e.dt).map(e=>e.dt);
+  let minY, maxY, minM=0, maxM=11;
+  const now = new Date();
+  if(dates.length){
+    const sorted = dates.slice().sort();
+    const minD = new Date(sorted[0]);
+    const maxD = new Date(sorted[sorted.length-1]);
+    minY = minD.getFullYear(); minM = minD.getMonth();
+    maxY = Math.max(maxD.getFullYear(), now.getFullYear());
+    maxM = (maxY===now.getFullYear()) ? now.getMonth() : maxD.getMonth();
+  } else {
+    minY = now.getFullYear(); maxY = now.getFullYear();
+    minM = 0; maxM = now.getMonth();
+  }
+  let options = '<option value="">— ทั้งหมด —</option>';
+  for(let y=maxY; y>=minY; y--){
+    const startM = (y===maxY) ? maxM : 11;
+    const endM = (y===minY) ? minM : 0;
+    for(let m=startM; m>=endM; m--){
+      const val = `${y}-${String(m+1).padStart(2,'0')}`;
+      options += `<option value="${val}">${THAI_MONTH_NAMES[m]} ${y}</option>`;
+    }
+  }
+  sel.innerHTML = options;
+}
+
+function setExportMonth(val){
+  if(!val){ clearExportDates(); return; }
+  const [y,m] = val.split('-').map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  document.getElementById('export-date-from').value = `${y}-${String(m).padStart(2,'0')}-01`;
+  document.getElementById('export-date-to').value = `${y}-${String(m).padStart(2,'0')}-${lastDay}`;
+  updateExportInfo();
+}
+
 function clearExportDates(){
   document.getElementById('export-date-from').value='';
   document.getElementById('export-date-to').value='';
+  const sel=document.getElementById('export-month-select');
+  if(sel) sel.value='';
   updateExportInfo();
 }
 function setExportThisMonth(){
@@ -1372,6 +1425,8 @@ function setExportThisMonth(){
   const lastDay=new Date(y,now.getMonth()+1,0).getDate();
   document.getElementById('export-date-from').value=`${y}-${m}-01`;
   document.getElementById('export-date-to').value=`${y}-${m}-${lastDay}`;
+  const sel=document.getElementById('export-month-select');
+  if(sel) sel.value=`${y}-${m}`;
   updateExportInfo();
 }
 function getExportDateRange(){
@@ -1380,6 +1435,16 @@ function getExportDateRange(){
   return {from,to};
 }
 function updateExportInfo(){
+  // if dates don't match the selected month exactly, deselect month dropdown
+  const sel=document.getElementById('export-month-select');
+  if(sel && sel.value){
+    const [y,m]=sel.value.split('-').map(Number);
+    const lastDay=new Date(y,m,0).getDate();
+    const expFrom=`${y}-${String(m).padStart(2,'0')}-01`;
+    const expTo=`${y}-${String(m).padStart(2,'0')}-${lastDay}`;
+    const {from,to}=getExportDateRange();
+    if(from!==expFrom || to!==expTo) sel.value='';
+  }
   const {from,to}=getExportDateRange();
   const info=document.getElementById('export-date-info');
   if(!from&&!to){info.textContent='ไม่ได้กรองวันที่ — ส่งออกข้อมูลทั้งหมด';return;}
@@ -1402,8 +1467,20 @@ function exportExcel(){
     const a = document.createElement('a');
     a.href=url;
     const {from,to}=getExportDateRange();
-    const suffix = from&&to ? `_${from}_to_${to}` : from ? `_from_${from}` : to ? `_to_${to}` : '';
-    a.download=`SpendingReport${suffix}_${new Date().toISOString().slice(0,10)}.xlsx`;
+    let suffix = '';
+    if(from && to){
+      // check if range matches a full calendar month
+      const fD=new Date(from), tD=new Date(to);
+      const isFullMonth = fD.getDate()===1 && tD.getDate()===new Date(tD.getFullYear(),tD.getMonth()+1,0).getDate()
+        && fD.getFullYear()===tD.getFullYear() && fD.getMonth()===tD.getMonth();
+      if(isFullMonth){
+        suffix = `_${ENG_MONTH_NAMES[fD.getMonth()]}${fD.getFullYear()}`;
+      } else {
+        suffix = `_${from}_to_${to}`;
+      }
+    } else if(from){ suffix = `_from_${from}`; }
+    else if(to){ suffix = `_to_${to}`; }
+    a.download = suffix ? `SpendingReport${suffix}.xlsx` : `SpendingReport_${new Date().toISOString().slice(0,10)}.xlsx`;
     document.body.appendChild(a); a.click();
     setTimeout(()=>{try{URL.revokeObjectURL(url);a.remove();}catch(x){}},1500);
     showToast('ดาวน์โหลด Excel เรียบร้อย ✓');
@@ -1442,7 +1519,17 @@ function buildStyledXlsx() {
     return true;
   };
   const filteredEntries = data.entries.filter(filterEntry);
-  const dateLabel = from||to ? ` (${from||'ทั้งหมด'} ถึง ${to||'ทั้งหมด'})` : '';
+  let dateLabel = '';
+  if(from || to){
+    if(from && to){
+      const fD=new Date(from), tD=new Date(to);
+      const isFullMonth = fD.getDate()===1 && tD.getDate()===new Date(tD.getFullYear(),tD.getMonth()+1,0).getDate()
+        && fD.getFullYear()===tD.getFullYear() && fD.getMonth()===tD.getMonth();
+      dateLabel = isFullMonth ? ` — ${THAI_MONTH_NAMES[fD.getMonth()]} ${fD.getFullYear()}` : ` (${from} ถึง ${to})`;
+    } else {
+      dateLabel = ` (${from||'ทั้งหมด'} ถึง ${to||'ทั้งหมด'})`;
+    }
+  }
   // ── Styles ──
   // xf index: 0=normal, 1=header(dark), 2=header(mid), 3=total, 4=number, 5=cash+, 6=cash-, 7=title, 8=subheader
   const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -2534,17 +2621,22 @@ function renderOwnerDashboard() {
       </div>
       ${isEmpty?'<div style="font-size:11px;color:var(--red);margin-bottom:6px">&#9888; ยังไม่มียอดเงินสด</div>':isLow?'<div style="font-size:11px;color:#BA7517;margin-bottom:6px">&#9888; ยอดเงินสดใกล้หมด</div>':''}
       <div class="pocket-topup-row">
-        <input type="date" id="topup-date-${esc(cat)}" value="${new Date().toISOString().slice(0,10)}" style="width:140px;flex-shrink:0">
-        <input type="number" id="topup-${esc(cat)}" placeholder="เติมเงิน (฿)..." min="0" step="100">
-        <button class="btn btn-success btn-sm" onclick="topupPocket('${cat.replace(/'/g,"\\'")}')"><i class="ti ti-plus"></i> เติม</button>
+        <div class="topup-date-row">
+          <label>วันที่เติมเงิน</label>
+          <input type="date" id="topup-date-${esc(cat)}" value="${new Date().toISOString().slice(0,10)}">
+        </div>
+        <div class="topup-amount-row">
+          <input type="number" id="topup-${esc(cat)}" placeholder="จำนวนเงิน (฿)..." min="0" step="100">
+          <button class="btn btn-success btn-sm" onclick="topupPocket('${cat.replace(/'/g,"\\'")}')"><i class="ti ti-plus"></i> เติม</button>
+        </div>
       </div>
     </div>`;
   });
   document.getElementById('pocket-grid').innerHTML = pocketHtml || '<p style="font-size:13px;color:var(--text2)">ยังไม่มีแผนก</p>';
 
   // Combined timeline: topup + cash spending
-  const topupEvents = (data.topupHistory||[]).map(h=>({
-    type:'topup', date:h.date, cat:h.category, amount:h.amount, by:h.by||'Owner', details:''
+  const topupEvents = (data.topupHistory||[]).map((h,i)=>({
+    type:'topup', date:h.date, cat:h.category, amount:h.amount, by:h.by||'Owner', details:'', topupIdx:i
   }));
   const cashEvents = data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).map(e=>({
     type:'spend', date:e.createdAt||e.dt, cat:e.category, amount:e.amount,
@@ -2567,11 +2659,28 @@ function renderOwnerDashboard() {
             <div style="font-size:11px;color:var(--text2);margin-top:2px">${fmtDT(ev.date)} &middot; ${esc(ev.by)}</div>
           </div>
         </div>
-        <span style="font-weight:700;white-space:nowrap;color:${ev.type==='topup'?'#1a5276':'var(--red)'}">
-          ${ev.type==='topup'?'+':'-'}${fmtBaht(ev.amount)}
-        </span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-weight:700;white-space:nowrap;color:${ev.type==='topup'?'#1a5276':'var(--red)'}">
+            ${ev.type==='topup'?'+':'-'}${fmtBaht(ev.amount)}
+          </span>
+          ${ev.type==='topup'?`<button class="btn btn-sm" style="padding:4px 8px;color:var(--red)" onclick="cancelTopup(${ev.topupIdx})" title="ยกเลิกการเติมเงิน"><i class="ti ti-trash"></i></button>`:''}
+        </div>
       </div>`).join('');
   }
+}
+
+function cancelTopup(idx) {
+  const h = data.topupHistory[idx];
+  if(!h) return;
+  if(!confirm(`ยกเลิกการเติมเงิน ${fmtBaht(h.amount)} เข้า ${h.category} เมื่อ ${fmtDT(h.date)}?\n\nยอดเงินสดในกระเป๋าจะถูกหักออกตามจำนวนนี้`)) return;
+  // deduct from pocket
+  if(!data.cashPockets) data.cashPockets = {};
+  data.cashPockets[h.category] = Math.max(0, (data.cashPockets[h.category]||0) - h.amount);
+  // remove from history
+  data.topupHistory.splice(idx,1);
+  save();
+  renderOwnerDashboard();
+  showToast('ยกเลิกการเติมเงินแล้ว');
 }
 
 function topupPocket(cat) {
