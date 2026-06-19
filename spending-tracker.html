@@ -207,6 +207,17 @@ var selectedPayment = 'transfer';
   .split-rows { display:flex; flex-direction:column; gap:6px; }
   .split-row { display:grid; grid-template-columns:1fr 110px 24px; gap:6px; align-items:center; }
   .split-row select, .split-row input { padding:5px 7px; font-size:12px; }
+  /* Split item with expense category (2-row layout) */
+  .split-item { border:0.5px solid var(--border); border-radius:var(--radius); padding:8px; margin-bottom:6px; background:var(--surface); }
+  .split-item-row1 { display:flex; gap:6px; margin-bottom:6px; align-items:center; }
+  .split-item-row1 select { flex:1; padding:5px 7px; font-size:12px; font-weight:600; }
+  .split-item-row2 { display:flex; gap:6px; }
+  .split-item-row2 select { flex:1.4; padding:5px 7px; font-size:11px; }
+  .split-item-row2 input { flex:1; padding:5px 7px; font-size:12px; }
+  /* Slip-level payment toggle (compact) */
+  .slip-payment-toggle { display:flex; gap:6px; margin-bottom:8px; }
+  .slip-payment-toggle .payment-btn { padding:6px 10px; font-size:12px; }
+  .slip-expense-hint { font-size:11px; color:var(--text2); margin-top:3px; font-style:italic; min-height:14px; }
   .split-remove-btn { background:none; border:none; cursor:pointer; color:var(--text2); font-size:15px; padding:2px; border-radius:4px; display:flex; align-items:center; }
   .split-remove-btn:hover { color:var(--red); background:var(--red-light); }
   .split-add-btn { margin-top:6px; font-size:12px; padding:5px 10px; }
@@ -720,14 +731,19 @@ function loadLocal() {
     const s = localStorage.getItem('spending_data_th') || localStorage.getItem('spending_data_th_local') || localStorage.getItem('spending_data_local');
     if (s) {
       data = JSON.parse(s);
-      // migrate บ้านเค้ก → Bakelab
-      data.categories = data.categories.map(c => c === 'บ้านเค้ก' ? 'Bakelab' : c);
-      data.entries = data.entries.map(e => e.category === 'บ้านเค้ก' ? {...e, category:'Bakelab'} : e);
+      data.categories = (data.categories||[]).map(c => c === 'บ้านเค้ก' ? 'Bakelab' : c);
+      data.entries = (data.entries||[]).map(e => e.category === 'บ้านเค้ก' ? {...e, category:'Bakelab'} : e);
     }
   } catch(e){}
-  if (!data.categories || !data.categories.length) data.categories = [...DEFAULT_CATS];
-  if (!data.entries) data.entries = [];
-  if (!data.companies) data.companies = [];
+  if(!data.categories || !data.categories.length) data.categories = [...DEFAULT_CATS];
+  if(!data.entries)        data.entries = [];
+  if(!data.companies)      data.companies = [];
+  if(!data._version)       data._version = 0;
+  if(!data._lastUpdatedBy) data._lastUpdatedBy = '';
+  if(!data._lastUpdatedAt) data._lastUpdatedAt = '';
+  if(!data._lastUpdatedAvatar) data._lastUpdatedAvatar = '';
+  if(!data.cashPockets)    data.cashPockets = {};
+  if(!data.topupHistory)   data.topupHistory = [];
 }
 
 /* ═══════════════════════════════════════════
@@ -1112,14 +1128,27 @@ async function loadFromDrive() {
     const remoteData = await dl.json();
     // merge: prefer whichever has more entries
     if (remoteData && remoteData.entries) {
-      const localCount = data.entries.length;
-      const remoteCount = remoteData.entries.length;
-      if (remoteCount >= localCount) {
+      const localVer  = data._version  || 0;
+      const remoteVer = remoteData._version || 0;
+      // last-write-wins: use whichever version is higher
+      if (remoteVer >= localVer) {
         data = remoteData;
-        data.categories = (data.categories || []).map(c => c === 'บ้านเค้ก' ? 'Bakelab' : c);
-        data.entries = (data.entries || []).map(e => e.category === 'บ้านเค้ก' ? {...e, category:'Bakelab'} : e);
+        // ── migrations for old data ──
+        if(!data._version)      data._version = 0;
+        if(!data._lastUpdatedBy) data._lastUpdatedBy = '';
+        if(!data._lastUpdatedAt) data._lastUpdatedAt = '';
+        if(!data._lastUpdatedAvatar) data._lastUpdatedAvatar = '';
+        if(!data.entries)       data.entries = [];
+        if(!data.cashPockets)   data.cashPockets = {};
+        if(!data.topupHistory)  data.topupHistory = [];
+        if(!data.companies)     data.companies = [];
+        if(!data.categories || !data.categories.length) data.categories = [...DEFAULT_CATS];
+        // rename old category name
+        data.categories = data.categories.map(c => c === 'บ้านเค้ก' ? 'Bakelab' : c);
+        data.entries = data.entries.map(e => e.category === 'บ้านเค้ก' ? {...e, category:'Bakelab'} : e);
         saveLocal();
         populateCategorySelect();
+        updateLastUpdatedBar();
         showToast('โหลดข้อมูลจาก Drive แล้ว ✓');
       }
     }
@@ -1142,9 +1171,14 @@ function setPillSyncing(on) {
 function catColor(n) { let h=0; for(let c of n){h=(h*31+c.charCodeAt(0))%PALETTE.length;} return PALETTE[h]; }
 function fmtBaht(n) { return '฿'+n.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtBahtShort(n) { return '฿'+n.toLocaleString('th-TH',{minimumFractionDigits:0,maximumFractionDigits:0}); }
-function fmtDT(s) {
-  const d=new Date(s);
-  return d.toLocaleDateString('th-TH',{day:'2-digit',month:'short',year:'numeric'});
+function fmtDT(v){
+  if(!v) return '—';
+  try {
+    // handle YYYY-MM-DD (date only) vs full ISO
+    const d = v.length <= 10 ? new Date(v+'T00:00:00') : new Date(v);
+    if(isNaN(d.getTime())) return String(v).slice(0,10);
+    return d.toLocaleDateString('th-TH',{day:'2-digit',month:'short',year:'numeric'});
+  } catch(e) { return String(v).slice(0,10); }
 }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -1251,7 +1285,7 @@ function confirmEntry(){
   if(pendingEntry.company&&!data.companies.includes(pendingEntry.company)) data.companies.push(pendingEntry.company);
   // deduct cash pocket if payment is cash
   if(pendingEntry.paymentMethod==='cash' && pendingEntry.category){
-    if(!data.cashPockets[pendingEntry.category]) data.cashPockets[pendingEntry.category]=0;
+    if(!data.cashPockets) data.cashPockets = {};
     data.cashPockets[pendingEntry.category] = Math.max(0, (data.cashPockets[pendingEntry.category]||0) - pendingEntry.amount);
   }
 
@@ -1274,7 +1308,7 @@ function deleteEntry(id){
   e.deletedBy=driveState.currentUser?driveState.currentUser.name:'Unknown';
   e.deletedAt=new Date().toISOString();
   // คืนเงินสดกลับกระเป๋าถ้าจ่ายด้วย Cash
-  if(e.paymentMethod==='cash' && e.category){
+  if((e.paymentMethod||'transfer')==='cash' && e.category){
     if(!data.cashPockets) data.cashPockets={};
     data.cashPockets[e.category] = (data.cashPockets[e.category]||0) + e.amount;
   }
@@ -1309,7 +1343,7 @@ function renderRecords(){
     const color=catColor(e.category);
     return `<tr>
       <td style="font-size:12px">${fmtDT(e.dt)}</td>
-      <td>${e.paymentMethod==='cash'?'💵 Cash':'🏦 Transfer'}</td>
+      <td>${(e.paymentMethod||'transfer')==='cash'?'💵 Cash':'🏦 Transfer'}</td>
       <td>${esc(e.transfer||'—')}</td>
       <td>${esc(e.company||'—')}</td>
       <td><span class="badge" style="background:${color}22;color:${color}">${esc(e.category)}</span></td>
@@ -1589,8 +1623,8 @@ function buildStyledXlsx() {
     const cats=data.categories||[];
     const exportDate=new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'long',year:'numeric'})+dateLabel;
     const totalAll=filteredEntries.reduce((s,e)=>s+e.amount,0);
-    const totalCash=data.entries.filter(e=>!e.deleted&&e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
-    const totalTransfer=data.entries.filter(e=>!e.deleted&&e.paymentMethod!=='cash').reduce((s,e)=>s+e.amount,0);
+    const totalCash=filteredEntries.filter(e=>e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
+    const totalTransfer=filteredEntries.filter(e=>e.paymentMethod!=='cash').reduce((s,e)=>s+e.amount,0);
 
     let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
     // col widths
@@ -1612,7 +1646,7 @@ function buildStyledXlsx() {
     // Per-แผนก rows
     let r=7;
     cats.forEach(cat=>{
-      const ents=data.entries.filter(e=>!e.deleted&&e.category===cat);
+      const ents=filteredEntries.filter(e=>e.category===cat);
       const tot=ents.reduce((s,e)=>s+e.amount,0);
       const cash=ents.filter(e=>e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
       const tr=ents.filter(e=>e.paymentMethod!=='cash').reduce((s,e)=>s+e.amount,0);
@@ -1627,7 +1661,7 @@ function buildStyledXlsx() {
     r++;
     const expTypes=['ต้นทุนขาย (Cost of Goods Sold)','ค่าแรงงาน (Labor)','ค่าสาธารณูปโภค (Utilities)','ค่าเช่า (Rent)','การตลาด (Marketing)','อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)','ค่าใช้จ่ายทั่วไป (General & Admin)'];
     expTypes.forEach(et=>{
-      const ents=data.entries.filter(e=>!e.deleted&&e.expenseCat===et);
+      const ents=filteredEntries.filter(e=>e.expenseCat===et);
       if(!ents.length)return;
       xml+=`<row r="${r}">${T(`A${r}`,et,8)}${N(`B${r}`,ents.length,4)}${N(`C${r}`,ents.reduce((s,e)=>s+e.amount,0),4)}</row>`;
       r++;
@@ -1639,7 +1673,7 @@ function buildStyledXlsx() {
     cats.forEach(cat=>{
       const bal=(data.cashPockets||{})[cat]||0;
       const topped=(data.topupHistory||[]).filter(h=>h.category===cat).reduce((s,h)=>s+h.amount,0);
-      const spent=data.entries.filter(e=>!e.deleted&&e.category===cat&&e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
+      const spent=filteredEntries.filter(e=>e.category===cat&&e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
       xml+=`<row r="${r}">${T(`A${r}`,cat,8)}${N(`B${r}`,bal,5)}${N(`C${r}`,topped,4)}${N(`D${r}`,spent,6)}</row>`;
       r++;
     });
@@ -1681,7 +1715,7 @@ function buildStyledXlsx() {
 
   /* ── 3. PER-แผนก SHEETS ── */
   (data.categories||[]).forEach(cat=>{
-    const entries=data.entries.filter(e=>!e.deleted&&e.category===cat);
+    const entries=filteredEntries.filter(e=>e.category===cat);
     if(!entries.length)return;
     const hdr=['วันที่','ชำระด้วย','จ่ายให้','บริษัท / ร้านค้า','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)','บันทึกโดย'];
     let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
@@ -1722,7 +1756,7 @@ function buildStyledXlsx() {
   (data.categories||[]).forEach((cat,idx)=>{
     const topupEvts=(data.topupHistory||[]).filter(h=>h.category===cat)
       .map(h=>({date:h.date,type:'เติมเงิน',transfer:'',company:'',expenseCat:'',details:'เติมเงินสด',topup:h.amount,spend:0,by:h.by||'Owner'}));
-    const spendEvts=data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted)
+    const spendEvts=filteredEntries.filter(e=>e.category===cat&&e.paymentMethod==='cash')
       .map(e=>({date:e.createdAt||e.dt,type:'ใช้เงินสด',transfer:e.transfer||'',company:e.company||'',expenseCat:e.expenseCat||'',details:e.details||'',topup:0,spend:e.amount,by:e.createdBy||'Unknown'}));
     const all=[...topupEvts,...spendEvts].sort((a,b)=>new Date(a.date)-new Date(b.date));
     if(!all.length)return;
@@ -1914,7 +1948,8 @@ function handleSlipFiles(files) {
     const slip = { id, file, dataUrl: null, status: 'loading',
       date: new Date().toISOString().slice(0,10),
       transfer:'', company:'', amount:'', details:'',
-      category: data.categories[0]||'', rawText:'' };
+      category: data.categories[0]||'', rawText:'',
+      paymentMethod: 'transfer', expenseCat: '' };
     slips.push(slip);
     const reader = new FileReader();
     reader.onload = e => {
@@ -2079,11 +2114,16 @@ function renderSlipCard(slip) {
   const catOpts = data.categories.map(c =>
     `<option value="${esc(c)}"${c===slip.category?' selected':''}>${esc(c)}</option>`
   ).join('');
+  const expCatOpts = (sel) => Object.keys(EXPENSE_HINTS).map(et =>
+    `<option value="${esc(et)}"${et===sel?' selected':''}>${esc(et)}</option>`
+  ).join('');
+
   const statusHtml =
     slip.status==='loading' ? `<span class="slip-status reading"><span class="spinner"></span> กำลังโหลดรูป...</span>` :
     slip.status==='reading' ? `<span class="slip-status reading"><span class="spinner"></span> OCR กำลังอ่านข้อความ...</span>` :
     slip.status==='error'   ? `<span class="slip-status err"><i class="ti ti-alert-circle"></i> ${esc(slip.errorMsg||'อ่านไม่สำเร็จ')} &nbsp;<button class="btn btn-sm" onclick="retrySlip('${slip.id}')"><i class="ti ti-refresh"></i> ลองใหม่</button></span>` :
     `<span class="slip-status done"><i class="ti ti-circle-check"></i> OCR อ่านสำเร็จ — ตรวจสอบและเลือกแผนก</span>`;
+
   const totalAmt = parseFloat(slip.amount)||0;
   const splits = slip.splits || [];
   const splitTotal = splits.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
@@ -2092,13 +2132,33 @@ function renderSlipCard(slip) {
   const remainingStr = remaining===0 ? '✓ ยอดครบ' : remaining>0 ? `ยังขาดอีก ${remainingFmt(remaining)}` : `เกินมา ${remainingFmt(remaining)}`;
   const remainingClass = remaining===0?'ok':remaining>0?'under':'over';
 
+  // payment toggle (shared per slip)
+  const pm = slip.paymentMethod || 'transfer';
+  const paymentToggleHtml = `
+    <div class="slip-payment-toggle">
+      <button type="button" class="payment-btn${pm==='transfer'?' selected-transfer':''}" onclick="setSlipPayment('${slip.id}','transfer')">
+        <i class="ti ti-building-bank"></i> โอนเงิน
+      </button>
+      <button type="button" class="payment-btn${pm==='cash'?' selected-cash':''}" onclick="setSlipPayment('${slip.id}','cash')">
+        <i class="ti ti-cash"></i> เงินสด
+      </button>
+    </div>`;
+
   const splitRowsHtml = splits.map((r,i)=>{
     const catOpts2 = data.categories.map(c=>`<option value="${esc(c)}"${c===r.category?' selected':''}>${esc(c)}</option>`).join('');
-    return `<div class="split-row">
-      <select onchange="updateSplitRow('${slip.id}',${i},'category',this.value)">${catOpts2}</select>
-      <input type="number" value="${r.amount||''}" placeholder="0.00" min="0" step="0.01"
-        onchange="updateSplitAmt('${slip.id}',${i},this.value)">
-      <button class="split-remove-btn" onclick="removeSplitRow('${slip.id}',${i})" title="ลบ"><i class="ti ti-x"></i></button>
+    return `<div class="split-item">
+      <div class="split-item-row1">
+        <select onchange="updateSplitRow('${slip.id}',${i},'category',this.value)">${catOpts2}</select>
+        <button class="split-remove-btn" onclick="removeSplitRow('${slip.id}',${i})" title="ลบ"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="split-item-row2">
+        <select onchange="updateSplitRow('${slip.id}',${i},'expenseCat',this.value)">
+          <option value="">— ประเภทค่าใช้จ่าย —</option>
+          ${expCatOpts(r.expenseCat)}
+        </select>
+        <input type="number" value="${r.amount||''}" placeholder="฿0.00" min="0" step="0.01"
+          onchange="updateSplitAmt('${slip.id}',${i},this.value)">
+      </div>
     </div>`;
   }).join('');
 
@@ -2111,26 +2171,40 @@ function renderSlipCard(slip) {
       <div class="slip-field"><label>จ่ายให้</label>
         <input type="text" value="${esc(slip.transfer)}" onchange="updateSlipField('${slip.id}','transfer',this.value)"></div>
       <div class="slip-field"><label>บริษัท / ร้านค้า</label>
-        <input type="text" value="${esc(slip.company)}" onchange="updateSlipField('${slip.id}','company',this.value)"></div>
+        <div style="position:relative">
+          <input type="text" value="${esc(slip.company)}" placeholder="พิมพ์ชื่อร้านค้า..."
+            oninput="onSlipCompanyInput(event,'${slip.id}')"
+            onblur="setTimeout(()=>hideSlipCompanyDrop('${slip.id}'),150)"
+            id="slip-company-input-${slip.id}">
+          <div id="slip-company-drop-${slip.id}" class="dropdown" style="display:none"></div>
+        </div>
+      </div>
       <div class="slip-field" style="grid-column:1/-1"><label>รายละเอียด / หมายเหตุ</label>
         <input type="text" value="${esc(slip.details)}" onchange="updateSlipField('${slip.id}','details',this.value)"></div>
     </div>
     <div class="split-section">
+      <div style="font-size:12px;color:var(--text2);font-weight:600;margin-bottom:6px"><i class="ti ti-credit-card" style="margin-right:4px"></i>วิธีชำระเงิน</div>
+      ${paymentToggleHtml}
       <div class="split-toggle-row">
-        <span class="split-toggle-label"><i class="ti ti-scissors" style="font-size:13px;margin-right:4px"></i>แยกยอดหลาย Category</span>
+        <span class="split-toggle-label"><i class="ti ti-scissors" style="font-size:13px;margin-right:4px"></i>แยกยอดหลายแผนก</span>
         <button class="toggle-btn ${splits.length?'active':''}" onclick="toggleSplit('${slip.id}')">
           ${splits.length ? 'เปิดอยู่ · ปิด' : 'เปิดใช้งาน'}
         </button>
       </div>
       ${splits.length===0 ? `
-        <div style="font-size:12px;color:var(--text2)">
-          <i class="ti ti-tag" style="margin-right:4px"></i>
-          <span style="font-weight:600;color:var(--green-dark)">★ แผนก (เลือกเอง)</span>
-          <select style="margin-left:8px;padding:5px 8px;font-size:13px" onchange="updateSlipField('${slip.id}','category',this.value)">${catOpts}</select>
-        </div>` : `
-        <div style="font-size:11px;color:var(--text2);margin-bottom:6px;display:grid;grid-template-columns:1fr 110px 24px;gap:6px">
-          <span>แผนก</span><span style="text-align:right">จำนวนเงิน (฿)</span><span></span>
+        <div class="slip-field">
+          <label style="font-weight:600;color:var(--green-dark)"><i class="ti ti-tag" style="margin-right:4px"></i>★ แผนก (เลือกเอง)</label>
+          <select onchange="updateSlipField('${slip.id}','category',this.value)">${catOpts}</select>
         </div>
+        <div class="slip-field" style="margin-top:8px">
+          <label><i class="ti ti-briefcase" style="margin-right:4px"></i>ประเภทค่าใช้จ่าย</label>
+          <select onchange="updateSlipField('${slip.id}','expenseCat',this.value);updateSlipExpenseHint('${slip.id}')" id="slip-expcat-${slip.id}">
+            <option value="">— เลือกประเภท —</option>
+            ${expCatOpts(slip.expenseCat)}
+          </select>
+          <div class="slip-expense-hint" id="slip-exphint-${slip.id}">${esc(EXPENSE_HINTS[slip.expenseCat]||'')}</div>
+        </div>` : `
+        <div style="font-size:11px;color:var(--text2);margin-bottom:6px">แต่ละแผนกเลือก <strong>ประเภทค่าใช้จ่าย</strong> และกรอก <strong>จำนวนเงิน</strong> ของตัวเอง</div>
         <div class="split-rows">${splitRowsHtml}</div>
         <button class="btn split-add-btn" onclick="addSplitRow('${slip.id}')"><i class="ti ti-plus"></i> เพิ่มแผนก</button>
         <div class="split-total-row">
@@ -2138,6 +2212,7 @@ function renderSlipCard(slip) {
           <span class="split-remaining ${remainingClass}">${remainingStr}</span>
         </div>`}
     </div>` : `<div style="font-size:13px;color:var(--text2);padding:8px 0">รอ OCR อ่านข้อความ...</div>`;
+
   const html = `<div class="slip-card ${slip.status==='error'?'error':slip.status==='done'?'success':''}" id="slip-card-${slip.id}">
     <div class="slip-card-header">
       <span style="font-size:12px;color:var(--text2)">${esc(slip.file.name)}</span>
@@ -2151,6 +2226,43 @@ function renderSlipCard(slip) {
   const existing = document.getElementById('slip-card-'+slip.id);
   if (existing) existing.outerHTML = html;
   else grid.insertAdjacentHTML('beforeend', html);
+}
+
+function onSlipCompanyInput(e, id) {
+  const val = e.target.value;
+  updateSlipField(id, 'company', val);
+  const drop = document.getElementById('slip-company-drop-'+id);
+  if(!drop) return;
+  const q = val.toLowerCase();
+  const matches = (data.companies||[]).filter(c=>c.toLowerCase().includes(q)).slice(0,8);
+  if(!matches.length || !val){ drop.style.display='none'; return; }
+  drop.innerHTML = matches.map(c=>
+    `<div class="drop-item" onmousedown="selectSlipCompany('${id}','${c.replace(/'/g,"\\'")}')">
+      <i class="ti ti-building" style="font-size:12px;margin-right:6px;color:var(--text2)"></i>${esc(c)}
+    </div>`).join('');
+  drop.style.display='block';
+}
+function selectSlipCompany(id, company) {
+  updateSlipField(id, 'company', company);
+  const inp = document.getElementById('slip-company-input-'+id);
+  if(inp) inp.value = company;
+  hideSlipCompanyDrop(id);
+}
+function hideSlipCompanyDrop(id) {
+  const drop = document.getElementById('slip-company-drop-'+id);
+  if(drop) drop.style.display='none';
+}
+
+function setSlipPayment(id, method) {
+  const s = slips.find(x=>x.id==id); if(!s) return;
+  s.paymentMethod = method;
+  renderSlipCard(s);
+}
+
+function updateSlipExpenseHint(id) {
+  const sel = document.getElementById('slip-expcat-'+id);
+  const hint = document.getElementById('slip-exphint-'+id);
+  if(sel && hint) hint.textContent = EXPENSE_HINTS[sel.value] || '';
 }
 
 function updateSlipStatus(id, status) {
@@ -2184,37 +2296,58 @@ function confirmAllSlips() {
   const ready=slips.filter(s=>s.status==='done');
   if(!ready.length){alert('ยังไม่มีสลิปที่อ่านสำเร็จ');return;}
   let saved=0;
+  const who = driveState.currentUser ? driveState.currentUser.name : 'Unknown';
+  const nowISO = new Date().toISOString();
+
   ready.forEach(slip=>{
     const totalAmt=parseFloat(slip.amount);
     if(!slip.date||isNaN(totalAmt)||totalAmt<=0) return;
+    const paymentMethod = slip.paymentMethod || 'transfer';
 
     if (slip.splits && slip.splits.length>0) {
       // validate split total
       const splitTotal=slip.splits.reduce((s,r)=>s+(parseFloat(r.amount)||0),0);
       const diff=Math.abs(totalAmt-splitTotal);
       if(diff>0.02){ alert(`สลิป "${slip.file.name}": ยอดแยกไม่ตรงกับยอดรวม\nยอดรวม: ฿${totalAmt}\nยอดแยกรวม: ฿${splitTotal.toFixed(2)}`); return; }
-      // create one entry per split row
+      // create one entry per split row (one per แผนก)
       slip.splits.forEach(row=>{
         const amt=parseFloat(row.amount);
         if(!amt||amt<=0) return;
+        const cat = row.category||data.categories[0]||'';
         const entry={
           id:Date.now()+Math.random(), dt:slip.date, amount:amt,
           transfer:slip.transfer||'', company:slip.company||'',
-          category:row.category||data.categories[0]||'',
-          details:(slip.details?(slip.details+' · '):'')+'แยกยอดจากสลิป'
+          category:cat, expenseCat:row.expenseCat||'',
+          paymentMethod,
+          details:(slip.details?(slip.details+' · '):'')+'แยกยอดจากสลิป',
+          createdBy:who, createdAt:nowISO
         };
         data.entries.unshift(entry);
         if(entry.company&&!data.companies.includes(entry.company)) data.companies.push(entry.company);
+        // deduct cash pocket per แผนก
+        if(paymentMethod==='cash' && cat){
+          if(!data.cashPockets) data.cashPockets={};
+          data.cashPockets[cat] = Math.max(0,(data.cashPockets[cat]||0)-amt);
+        }
         saved++;
       });
     } else {
+      const cat = slip.category||data.categories[0]||'';
       const entry={
         id:Date.now()+Math.random(), dt:slip.date, amount:totalAmt,
         transfer:slip.transfer||'', company:slip.company||'',
-        category:slip.category||data.categories[0]||'', details:slip.details||''
+        category:cat, expenseCat:slip.expenseCat||'',
+        paymentMethod,
+        details:slip.details||'',
+        createdBy:who, createdAt:nowISO
       };
       data.entries.unshift(entry);
       if(entry.company&&!data.companies.includes(entry.company)) data.companies.push(entry.company);
+      // deduct cash pocket
+      if(paymentMethod==='cash' && cat){
+        if(!data.cashPockets) data.cashPockets={};
+        data.cashPockets[cat] = Math.max(0,(data.cashPockets[cat]||0)-totalAmt);
+      }
       saved++;
     }
   });
@@ -2232,7 +2365,7 @@ function toggleSplit(id) {
     slip.splits=[];
   } else {
     // start with one row using current single category
-    slip.splits=[{ category:slip.category||data.categories[0]||'', amount:'' }];
+    slip.splits=[{ category:slip.category||data.categories[0]||'', expenseCat:slip.expenseCat||'', amount:'' }];
   }
   renderSlipCard(slip);
 }
@@ -2240,7 +2373,7 @@ function toggleSplit(id) {
 function addSplitRow(id) {
   const slip=slips.find(s=>s.id==id); if(!slip) return;
   if(!slip.splits) slip.splits=[];
-  slip.splits.push({ category:data.categories[0]||'', amount:'' });
+  slip.splits.push({ category:data.categories[0]||'', expenseCat:'', amount:'' });
   renderSlipCard(slip);
 }
 
@@ -2596,7 +2729,11 @@ function renderOwnerDashboard() {
   const cats = data.categories || [];
 
   // Summary
-  const totalPockets = cats.reduce((s,c)=>s+(data.cashPockets[c]||0),0);
+  const totalPockets = cats.reduce((s,c)=>{
+    const t=(data.topupHistory||[]).filter(h=>h.category===c).reduce((a,h)=>a+h.amount,0);
+    const sp=data.entries.filter(e=>e.category===c&&e.paymentMethod==='cash'&&!e.deleted).reduce((a,e)=>a+e.amount,0);
+    return s+Math.max(0,t-sp);
+  },0);
   const totalCashSpent = data.entries.filter(e=>e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
   const totalTopup = (data.topupHistory||[]).reduce((s,h)=>s+h.amount,0);
   document.getElementById('owner-summary').innerHTML = `
@@ -2607,9 +2744,12 @@ function renderOwnerDashboard() {
   // Pocket cards
   let pocketHtml = '';
   cats.forEach(cat => {
-    const balance = data.cashPockets[cat]||0;
-    const spent = data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
     const topped = (data.topupHistory||[]).filter(h=>h.category===cat).reduce((s,h)=>s+h.amount,0);
+    const spent = data.entries.filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted).reduce((s,e)=>s+e.amount,0);
+    const balance = Math.max(0, Math.round((topped - spent)*100)/100);
+    // sync cashPockets to match calculated balance
+    if(!data.cashPockets) data.cashPockets = {};
+    data.cashPockets[cat] = balance;
     const isLow = balance>0 && balance<5000;
     const isEmpty = balance<=0;
     pocketHtml += `<div class="pocket-card">
