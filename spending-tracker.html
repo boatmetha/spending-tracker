@@ -439,6 +439,7 @@ var selectedPayment = 'transfer';
   <!-- TABS -->
   <div class="tabs">
     <button class="tab active" onclick="switchTab('add')"><i class="ti ti-plus"></i> เพิ่มรายการ</button>
+    <button class="tab" onclick="switchTab('income')"><i class="ti ti-trending-up"></i> รายรับ</button>
     <button class="tab" onclick="switchTab('slip')"><i class="ti ti-scan"></i> อ่านสลิป</button>
     <button class="tab" onclick="switchTab('records')"><i class="ti ti-list"></i> รายการทั้งหมด</button>
     <button class="tab" onclick="switchTab('categories')"><i class="ti ti-tag"></i> แผนก</button>
@@ -464,6 +465,69 @@ var selectedPayment = 'transfer';
     <i class="ti ti-clock" style="font-size:12px"></i>
     <span id="last-updated-text"></span>
     <img id="last-updated-avatar" class="user-avatar" src="" style="display:none">
+  </div>
+
+  <!-- TAB: รายรับ -->
+  <div id="tab-income" style="display:none">
+    <div class="card">
+      <div class="card-title"><i class="ti ti-trending-up" style="color:var(--green)"></i> บันทึกรายรับ</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label><i class="ti ti-calendar" style="font-size:12px;margin-right:4px"></i>เดือน / ปี</label>
+          <select id="income-month" style="font-family:inherit"></select>
+        </div>
+        <div class="form-group">
+          <label><i class="ti ti-currency-baht" style="font-size:12px;margin-right:4px"></i>จำนวนเงิน (฿)</label>
+          <input type="number" id="income-amount" placeholder="0.00" min="0" step="0.01">
+        </div>
+        <div class="form-group full">
+          <label><i class="ti ti-tag" style="font-size:12px;margin-right:4px"></i>แผนก</label>
+          <div class="dept-checkbox-group" id="income-category-checks"></div>
+        </div>
+        <div class="form-group full">
+          <label><i class="ti ti-source-code" style="font-size:12px;margin-right:4px"></i>แหล่งรายรับ (Source of Income)</label>
+          <div style="position:relative">
+            <input type="text" id="income-source" placeholder="เช่น ยอดขาย, Delivery, Catering..."
+              oninput="onIncomeSourceInput()"
+              onblur="setTimeout(()=>document.getElementById('income-source-drop').style.display='none',150)">
+            <div id="income-source-drop" class="dropdown" style="display:none"></div>
+          </div>
+        </div>
+        <div class="form-group full">
+          <label><i class="ti ti-notes" style="font-size:12px;margin-right:4px"></i>หมายเหตุ (ไม่บังคับ)</label>
+          <input type="text" id="income-note" placeholder="รายละเอียดเพิ่มเติม...">
+        </div>
+      </div>
+      <div style="margin-top:1rem;display:flex;gap:8px">
+        <button class="btn btn-success" onclick="saveIncome()"><i class="ti ti-check"></i> บันทึกรายรับ</button>
+        <button class="btn" onclick="clearIncomeForm()"><i class="ti ti-x"></i> ล้าง</button>
+      </div>
+    </div>
+
+    <!-- Income records table -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="card-title" style="margin-bottom:0">รายการรายรับ</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="income-filter-month" onchange="renderIncomeTable()" style="padding:6px 8px;font-size:12px;font-family:inherit">
+            <option value="">ทุกเดือน</option>
+          </select>
+          <select id="income-filter-cat" onchange="renderIncomeTable()" style="padding:6px 8px;font-size:12px;font-family:inherit">
+            <option value="">ทุกแผนก</option>
+          </select>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="records-table" id="income-table">
+          <thead><tr>
+            <th>เดือน</th><th>แผนก</th><th>แหล่งรายรับ</th><th>หมายเหตุ</th>
+            <th style="text-align:right">จำนวนเงิน (฿)</th><th>บันทึกโดย</th><th></th>
+          </tr></thead>
+          <tbody id="income-tbody"></tbody>
+        </table>
+      </div>
+      <div id="income-total-row" style="text-align:right;font-weight:600;margin-top:8px;font-size:14px;color:var(--green-dark)"></div>
+    </div>
   </div>
 
   <!-- TAB: อ่านสลิป -->
@@ -716,7 +780,7 @@ const SHARED_FILE_ID = '1eXnI_EI3OrjF1kVu-bZUJbntdmAtt9GH'; // Shared DB file ID
    ═══════════════════════════════════════════ */
 const PALETTE = ['#1D9E75','#D85A30','#378ADD','#BA7517','#D4537E','#639922','#7F77DD','#3C3489','#885500','#185FA5'];
 const DEFAULT_CATS = ['Milkbar','Taihu','Bakelab','Nooch Coffee','ครัวร้อน'];
-let data = { entries: [], categories: [...DEFAULT_CATS], companies: [], _version: 0, _lastUpdatedBy: '', _lastUpdatedAt: '', _lastUpdatedAvatar: '', cashPockets: {}, topupHistory: [] };
+let data = { entries: [], categories: [...DEFAULT_CATS], companies: [], _version: 0, _lastUpdatedBy: '', _lastUpdatedAt: '', _lastUpdatedAvatar: '', cashPockets: {}, topupHistory: [], incomes: [], incomeSources: [] };
 let pendingEntry = null;
 let driveState = { signedIn: false, fileId: null, folderId: null, backupFolderId: null, tokenClient: null, gapiReady: false, pendingSync: false, syncFailCount: 0, retryTimer: null, lastBackupTime: 0, dbVersion: 0, currentUser: null, tokenRefreshTimer: null };
 
@@ -744,6 +808,8 @@ function loadLocal() {
   if(!data._lastUpdatedAvatar) data._lastUpdatedAvatar = '';
   if(!data.cashPockets)    data.cashPockets = {};
   if(!data.topupHistory)   data.topupHistory = [];
+  if(!data.incomes)        data.incomes = [];
+  if(!data.incomeSources)  data.incomeSources = [];
 }
 
 /* ═══════════════════════════════════════════
@@ -1141,6 +1207,8 @@ async function loadFromDrive() {
         if(!data.entries)       data.entries = [];
         if(!data.cashPockets)   data.cashPockets = {};
         if(!data.topupHistory)  data.topupHistory = [];
+        if(!data.incomes)       data.incomes = [];
+        if(!data.incomeSources) data.incomeSources = [];
         if(!data.companies)     data.companies = [];
         if(!data.categories || !data.categories.length) data.categories = [...DEFAULT_CATS];
         // rename old category name
@@ -1186,11 +1254,12 @@ function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
    TABS
    ═══════════════════════════════════════════ */
 function switchTab(name) {
-  ['add','slip','records','categories','export'].forEach((t,i)=>{
+  ['add','income','slip','records','categories','export'].forEach((t,i)=>{
     document.getElementById('tab-'+t).style.display = t===name?'':'none';
     document.querySelectorAll('.tab')[i].classList.toggle('active', t===name);
   });
   if(name==='add'){ document.getElementById('form-section').style.display=''; document.getElementById('confirm-section').style.display='none'; }
+  if(name==='income') renderIncomeTab();
   if(name==='slip') initSlipTab();
   if(name==='records'){ renderRecords(); populateRecordCatFilter(); }
   if(name==='categories') renderCategories();
@@ -1794,6 +1863,187 @@ function buildStyledXlsx() {
     sheetXmls.push(xml);
     sheetNames.push(('Cash_'+cat).replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Cash'+(idx+1));
   });
+
+  /* ── 5. FINANCIAL STATEMENT — Monthly P&L ── */
+  {
+    // Collect all months from entries + incomes
+    const allMonths = new Set();
+    filteredEntries.forEach(e=>{ if(e.dt) allMonths.add(e.dt.slice(0,7)); });
+    (data.incomes||[]).forEach(e=>{ if(e.month) allMonths.add(e.month); });
+    const months = Array.from(allMonths).sort().reverse();
+
+    if(months.length) {
+      const cats = data.categories||[];
+      const hdr = ['เดือน','รายรับรวม (฿)','รายจ่ายรวม (฿)','กำไร/ขาดทุน (฿)',
+        ...cats.flatMap(c=>[`${c} รายรับ`,`${c} รายจ่าย`,`${c} สุทธิ`])];
+      const rows = [hdr];
+
+      let yearMap = {};
+      months.forEach(month=>{
+        const mInc  = (data.incomes||[]).filter(e=>e.month===month).reduce((s,e)=>s+e.amount,0);
+        const mExp  = filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month).reduce((s,e)=>s+e.amount,0);
+        const mNet  = mInc - mExp;
+        const [y,m] = month.split('-');
+        yearMap[y] = yearMap[y]||{inc:0,exp:0};
+        yearMap[y].inc += mInc; yearMap[y].exp += mExp;
+
+        const row = [THAI_MONTH_NAMES[parseInt(m)-1]+' '+y, mInc, mExp, mNet];
+        cats.forEach(c=>{
+          const cInc = (data.incomes||[]).filter(e=>e.month===month&&e.category===c).reduce((s,e)=>s+e.amount,0);
+          const cExp = filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month&&e.category===c).reduce((s,e)=>s+e.amount,0);
+          row.push(cInc, cExp, cInc-cExp);
+        });
+        rows.push(row);
+      });
+
+      // Yearly subtotals
+      Object.entries(yearMap).sort((a,b)=>b[0]-a[0]).forEach(([y,v])=>{
+        const net = v.inc - v.exp;
+        const row = [`รวม ${y}`, v.inc, v.exp, net, ...cats.flatMap(()=>['','',''])];
+        rows.push(row);
+      });
+
+      // Grand total
+      const gInc = rows.slice(1).filter(r=>!String(r[0]).startsWith('รวม')).reduce((s,r)=>s+(r[1]||0),0);
+      const gExp = rows.slice(1).filter(r=>!String(r[0]).startsWith('รวม')).reduce((s,r)=>s+(r[2]||0),0);
+      rows.push(['รวมทั้งหมด', gInc, gExp, gInc-gExp, ...cats.flatMap(()=>['','',''])]);
+
+      let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+      xml+=`<cols><col min="1" max="1" width="20"/>${hdr.slice(1).map((_,i)=>`<col min="${i+2}" max="${i+2}" width="16"/>`).join('')}</cols>`;
+      xml+='<sheetData>';
+      xml+=`<row r="1" ht="28" customHeight="1">${T('A1','📈 Financial Statement'+dateLabel,7)}</row><row r="2"/>`;
+      xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+      rows.slice(1).forEach((row,ri)=>{
+        const r=ri+4;
+        const isTotal=String(row[0]).startsWith('รวม');
+        const s=isTotal?3:8;
+        xml+=`<row r="${r}">${row.map((v,i)=>{
+          if(i===0) return T(`${col(i)}${r}`,v,s);
+          if(typeof v==='number'){
+            const ns = i===3 ? (v>=0?5:6) : (i%3===0&&i>3?(v>=0?5:6):s===3?3:4);
+            return N(`${col(i)}${r}`,v,ns);
+          }
+          return T(`${col(i)}${r}`,v,s);
+        }).join('')}</row>`;
+      });
+      xml+='</sheetData></worksheet>';
+      sheetXmls.push(xml); sheetNames.push('📈 P&L Statement');
+    }
+  }
+
+  /* ── 6. PER-แผนก P&L SHEETS ── */
+  (data.categories||[]).forEach(cat=>{
+    const allMonths = new Set();
+    filteredEntries.filter(e=>e.category===cat).forEach(e=>{ if(e.dt) allMonths.add(e.dt.slice(0,7)); });
+    (data.incomes||[]).filter(e=>e.category===cat).forEach(e=>{ if(e.month) allMonths.add(e.month); });
+    const months = Array.from(allMonths).sort().reverse();
+    if(!months.length) return;
+
+    const hdr=['เดือน','รายรับ (฿)','รายจ่าย (฿)','กำไร/ขาดทุน (฿)','เงินสดคงเหลือ (฿)'];
+    let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml+=`<cols><col min="1" max="1" width="18"/><col min="2" max="5" width="18"/></cols>`;
+    xml+='<sheetData>';
+    xml+=`<row r="1" ht="28" customHeight="1">${T('A1','💼 '+cat+' — P&L Summary',7)}</row><row r="2"/>`;
+    xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+
+    let totalInc=0,totalExp=0;
+    const catRows=[];
+    months.forEach(month=>{
+      const [y,m]=month.split('-');
+      const mInc=(data.incomes||[]).filter(e=>e.month===month&&e.category===cat).reduce((s,e)=>s+e.amount,0);
+      const mExp=filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month&&e.category===cat).reduce((s,e)=>s+e.amount,0);
+      const mNet=mInc-mExp;
+      // cash pocket at end of month: topped - all cash spending up to this month
+      const topped=(data.topupHistory||[]).filter(h=>h.category===cat&&(h.date||'').slice(0,7)<=month).reduce((s,h)=>s+h.amount,0);
+      const cashSpent=(data.entries||[]).filter(e=>e.category===cat&&e.paymentMethod==='cash'&&!e.deleted&&e.dt&&e.dt.slice(0,7)<=month).reduce((s,e)=>s+e.amount,0);
+      const cashBal=Math.max(0,topped-cashSpent);
+      totalInc+=mInc; totalExp+=mExp;
+      catRows.push([THAI_MONTH_NAMES[parseInt(m)-1]+' '+y, mInc, mExp, mNet, cashBal]);
+    });
+    catRows.forEach((row,ri)=>{
+      const r=ri+4;
+      xml+=`<row r="${r}">${T(`A${r}`,row[0],8)}${N(`B${r}`,row[1],5)}${N(`C${r}`,row[2],6)}${N(`D${r}`,row[3],row[3]>=0?5:6)}${N(`E${r}`,row[4],4)}</row>`;
+    });
+    const lr=catRows.length+4;
+    xml+=`<row r="${lr}">${T(`A${lr}`,'รวม',3)}${N(`B${lr}`,totalInc,3)}${N(`C${lr}`,totalExp,3)}${N(`D${lr}`,totalInc-totalExp,3)}${T(`E${lr}`,'',3)}</row>`;
+    xml+='</sheetData></worksheet>';
+    sheetXmls.push(xml);
+    sheetNames.push((cat+'_PL').replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31));
+  });
+
+  /* ── 7. EXPENSE BREAKDOWN % SHEET ── */
+  {
+    const expTypes=['ต้นทุนขาย (Cost of Goods Sold)','ค่าแรงงาน (Labor)','ค่าสาธารณูปโภค (Utilities)',
+      'ค่าเช่า (Rent)','การตลาด (Marketing)','อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)','ค่าใช้จ่ายทั่วไป (General & Admin)'];
+    const allMonths=new Set(filteredEntries.filter(e=>e.dt).map(e=>e.dt.slice(0,7)));
+    const months=Array.from(allMonths).sort().reverse();
+    if(months.length){
+      const hdr=['ประเภทค่าใช้จ่าย',...months.map(m=>{const[y,mo]=m.split('-');return THAI_MONTH_NAMES[parseInt(mo)-1]+' '+y;}),'รวม','%'];
+      const rows=[hdr];
+      expTypes.forEach(et=>{
+        const row=[et];
+        let total=0;
+        months.forEach(month=>{
+          const v=filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month&&e.expenseCat===et).reduce((s,e)=>s+e.amount,0);
+          row.push(v); total+=v;
+        });
+        row.push(total,''); // % filled after
+        rows.push(row);
+      });
+      const grandTotal=rows.slice(1).reduce((s,r)=>s+(r[r.length-2]||0),0);
+      rows.slice(1).forEach(r=>{ r[r.length-1]=grandTotal>0?Math.round(r[r.length-2]/grandTotal*10000)/100:0; });
+      rows.push(['รวมทั้งหมด',...months.map(month=>filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month).reduce((s,e)=>s+e.amount,0)),grandTotal,100]);
+
+      let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+      xml+=`<cols><col min="1" max="1" width="32"/>${hdr.slice(1).map((_,i)=>`<col min="${i+2}" max="${i+2}" width="14"/>`).join('')}</cols>`;
+      xml+='<sheetData>';
+      xml+=`<row r="1" ht="28" customHeight="1">${T('A1','📊 Expense Breakdown'+dateLabel,7)}</row><row r="2"/>`;
+      xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+      rows.slice(1).forEach((row,ri)=>{
+        const r=ri+4;
+        const isTotal=row[0]==='รวมทั้งหมด';
+        const s=isTotal?3:8;
+        xml+=`<row r="${r}">${row.map((v,i)=>{
+          if(i===0) return T(`${col(i)}${r}`,v,s);
+          if(i===row.length-1) return T(`${col(i)}${r}`,typeof v==='number'?v+'%':v,s);
+          return typeof v==='number'?N(`${col(i)}${r}`,v,s===3?3:4):T(`${col(i)}${r}`,v,s);
+        }).join('')}</row>`;
+      });
+      xml+='</sheetData></worksheet>';
+      sheetXmls.push(xml); sheetNames.push('Expense Breakdown');
+    }
+  }
+
+  /* ── 8. INCOME DETAIL SHEET ── */
+  if((data.incomes||[]).length){
+    const incomeFiltered = from||to
+      ? (data.incomes||[]).filter(e=>(!from||e.month+'−01'>=from)&&(!to||e.month+'-31'<=to))
+      : (data.incomes||[]);
+    if(incomeFiltered.length){
+      const hdr=['เดือน','แผนก','แหล่งรายรับ','หมายเหตุ','จำนวนเงิน (฿)','บันทึกโดย'];
+      const rows=[hdr,...incomeFiltered.slice().sort((a,b)=>b.month.localeCompare(a.month)).map(e=>{
+        const [y,m]=e.month.split('-');
+        return [THAI_MONTH_NAMES[parseInt(m)-1]+' '+y, e.category||'', e.source||'', e.note||'', e.amount||0, e.createdBy||''];
+      })];
+      const total=incomeFiltered.reduce((s,e)=>s+e.amount,0);
+      rows.push(['รวม','','','',total,'']);
+      let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+      xml+=`<cols><col min="1" max="1" width="18"/><col min="2" max="2" width="14"/><col min="3" max="3" width="20"/><col min="4" max="4" width="22"/><col min="5" max="5" width="16"/><col min="6" max="6" width="16"/></cols>`;
+      xml+='<sheetData>';
+      xml+=`<row r="1" ht="28" customHeight="1">${T('A1','💰 รายรับ (Income)'+dateLabel,7)}</row><row r="2"/>`;
+      xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+      rows.slice(1).forEach((row,ri)=>{
+        const r=ri+4;
+        const isTotal=row[0]==='รวม';
+        const s=isTotal?3:8;
+        xml+=`<row r="${r}">${row.map((v,i)=>
+          (i===4&&typeof v==='number')?N(`${col(i)}${r}`,v,isTotal?3:5):T(`${col(i)}${r}`,v,s)
+        ).join('')}</row>`;
+      });
+      xml+='</sheetData></worksheet>';
+      sheetXmls.push(xml); sheetNames.push('Income');
+    }
+  }
 
   /* ── Build OOXML zip ── */
   const ssXml='<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'+strs.length+'" uniqueCount="'+strs.length+'">'+strs.map(s=>'<si><t xml:space="preserve">'+xmlEsc(s)+'</t></si>').join('')+'</sst>';
@@ -2840,6 +3090,168 @@ function topupPocket(cat) {
   save();
   renderOwnerDashboard();
   showToast(`เติมเงินสด ฿${fmtBahtShort(amount)} เข้า ${cat} วันที่ ${topupDate} ✓`);
+}
+/* ═══════════════════════════════════════════
+   INCOME SECTION
+   ═══════════════════════════════════════════ */
+const INCOME_START = '2026-01'; // earliest month for income
+
+function getIncomeMonthOptions(selectedVal) {
+  const now = new Date();
+  const curY = now.getFullYear(), curM = now.getMonth()+1;
+  let opts = '';
+  for(let y=curY; y>=2026; y--) {
+    const startM = (y===curY) ? curM : 12;
+    const endM   = (y===2026) ? 1 : 1;
+    for(let m=startM; m>=endM; m--) {
+      const val = `${y}-${String(m).padStart(2,'0')}`;
+      const label = `${THAI_MONTH_NAMES[m-1]} ${y}`;
+      opts += `<option value="${val}"${val===selectedVal?' selected':''}>${label}</option>`;
+    }
+  }
+  return opts;
+}
+
+function renderIncomeTab() {
+  if(!data.incomes) data.incomes = [];
+  if(!data.incomeSources) data.incomeSources = [];
+
+  // Populate month selector
+  const now = new Date();
+  const curMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const sel = document.getElementById('income-month');
+  if(sel) sel.innerHTML = getIncomeMonthOptions(curMonth);
+
+  // Populate แผนก pills
+  const checksEl = document.getElementById('income-category-checks');
+  if(checksEl) {
+    checksEl.innerHTML = data.categories.map((c,i) => {
+      const id = 'icat_'+i;
+      return `<input type="radio" class="dept-checkbox-item" name="income-cat-radio" id="${id}" value="${esc(c)}" ${i===0?'checked':''}>
+              <label class="dept-checkbox-label" for="${id}">${esc(c)}</label>`;
+    }).join('');
+  }
+
+  // Populate filter dropdowns
+  const filterMonth = document.getElementById('income-filter-month');
+  const filterCat = document.getElementById('income-filter-cat');
+  if(filterMonth) {
+    const cur = filterMonth.value;
+    filterMonth.innerHTML = '<option value="">ทุกเดือน</option>' + getIncomeMonthOptions(cur);
+  }
+  if(filterCat) {
+    const cur = filterCat.value;
+    filterCat.innerHTML = '<option value="">ทุกแผนก</option>' +
+      data.categories.map(c=>`<option value="${esc(c)}"${c===cur?' selected':''}>${esc(c)}</option>`).join('');
+  }
+  renderIncomeTable();
+}
+
+function getSelectedIncomeCategory() {
+  const el = document.querySelector('input[name="income-cat-radio"]:checked');
+  return el ? el.value : (data.categories[0]||'');
+}
+
+function onIncomeSourceInput() {
+  const inp = document.getElementById('income-source');
+  const drop = document.getElementById('income-source-drop');
+  const val = inp.value.toLowerCase();
+  if(!val){ drop.style.display='none'; return; }
+  const matches = (data.incomeSources||[]).filter(s=>s.toLowerCase().includes(val)).slice(0,8);
+  if(!matches.length){ drop.style.display='none'; return; }
+  drop.innerHTML = matches.map(s=>
+    `<div class="drop-item" onmousedown="selectIncomeSource('${s.replace(/'/g,"\\'")}')">
+      <i class="ti ti-trending-up" style="font-size:12px;margin-right:6px;color:var(--green)"></i>${esc(s)}
+    </div>`).join('');
+  drop.style.display = 'block';
+}
+
+function selectIncomeSource(src) {
+  const inp = document.getElementById('income-source');
+  if(inp){ inp.value = src; }
+  const drop = document.getElementById('income-source-drop');
+  if(drop) drop.style.display = 'none';
+}
+
+function saveIncome() {
+  const month  = document.getElementById('income-month').value;
+  const amount = parseFloat(document.getElementById('income-amount').value);
+  const cat    = getSelectedIncomeCategory();
+  const source = document.getElementById('income-source').value.trim();
+  const note   = document.getElementById('income-note').value.trim();
+
+  if(!month){ alert('กรุณาเลือกเดือน'); return; }
+  if(isNaN(amount)||amount<=0){ alert('กรุณากรอกจำนวนเงิน'); return; }
+  if(!cat){ alert('กรุณาเลือกแผนก'); return; }
+  if(!source){ alert('กรุณากรอกแหล่งรายรับ'); return; }
+
+  if(!data.incomes) data.incomes = [];
+  if(!data.incomeSources) data.incomeSources = [];
+
+  const entry = {
+    id: Date.now()+Math.random(), month, category:cat, source, note,
+    amount, createdBy: driveState.currentUser?driveState.currentUser.name:'Unknown',
+    createdAt: new Date().toISOString()
+  };
+  data.incomes.unshift(entry);
+  if(!data.incomeSources.includes(source)) data.incomeSources.push(source);
+
+  save();
+  clearIncomeForm();
+  renderIncomeTable();
+  showToast('บันทึกรายรับเรียบร้อย ✓');
+}
+
+function clearIncomeForm() {
+  document.getElementById('income-amount').value = '';
+  document.getElementById('income-source').value = '';
+  document.getElementById('income-note').value = '';
+}
+
+function deleteIncome(id) {
+  if(!confirm('ต้องการลบรายรับนี้ใช่หรือไม่?')) return;
+  data.incomes = (data.incomes||[]).filter(e=>e.id!=id);
+  save();
+  renderIncomeTable();
+  showToast('ลบรายรับแล้ว');
+}
+
+function renderIncomeTable() {
+  const filterMonth = (document.getElementById('income-filter-month')||{}).value || '';
+  const filterCat   = (document.getElementById('income-filter-cat')||{}).value || '';
+
+  let rows = (data.incomes||[]).filter(e=>{
+    if(filterMonth && e.month!==filterMonth) return false;
+    if(filterCat && e.category!==filterCat) return false;
+    return true;
+  });
+
+  const tbody = document.getElementById('income-tbody');
+  const totalEl = document.getElementById('income-total-row');
+  if(!tbody) return;
+
+  if(!rows.length){
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:1.5rem">ยังไม่มีรายการรายรับ</td></tr>`;
+    if(totalEl) totalEl.textContent = '';
+    return;
+  }
+
+  // Sort by month desc then by createdAt desc
+  rows = rows.slice().sort((a,b)=> b.month===a.month ? new Date(b.createdAt)-new Date(a.createdAt) : b.month.localeCompare(a.month));
+
+  tbody.innerHTML = rows.map(e=>`
+    <tr>
+      <td>${esc(e.month ? THAI_MONTH_NAMES[parseInt(e.month.split('-')[1])-1]+' '+e.month.split('-')[0] : '—')}</td>
+      <td><span class="badge" style="background:${catColor(e.category)}22;color:${catColor(e.category)}">${esc(e.category)}</span></td>
+      <td style="font-weight:500">${esc(e.source||'—')}</td>
+      <td style="font-size:12px;color:var(--text2)">${esc(e.note||'—')}</td>
+      <td style="text-align:right;font-weight:600;color:var(--green-dark)">${fmtBaht(e.amount)}</td>
+      <td style="font-size:11px;color:var(--text2)">${esc(e.createdBy||'—')}</td>
+      <td><button class="del-row" onclick="deleteIncome(${e.id})" title="ลบ"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('');
+
+  const total = rows.reduce((s,e)=>s+e.amount,0);
+  if(totalEl) totalEl.innerHTML = `รวม ${rows.length} รายการ: <span style="color:var(--green-dark)">${fmtBaht(total)}</span>`;
 }
 </script>
 </body>
