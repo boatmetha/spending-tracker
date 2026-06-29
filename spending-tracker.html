@@ -314,6 +314,23 @@ var selectedPayment = 'transfer';
   .topup-amount { font-weight:600; color:#1a5276; }
   .owner-pin-box { background:var(--surface); border:0.5px solid var(--border); border-radius:var(--radius-lg); padding:2rem; width:320px; margin:auto; text-align:center; }
   .owner-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:1.5rem; }
+
+  /* ── IMPORT SECTION ── */
+  .import-zone { border:2px dashed var(--border2); border-radius:var(--radius-lg); padding:1.5rem; text-align:center; cursor:pointer; transition:all .15s; color:var(--text2); }
+  .import-zone:hover, .import-zone.drag { border-color:var(--green); background:var(--green-light); color:var(--green-dark); }
+  .import-zone i { font-size:28px; display:block; margin-bottom:8px; }
+  .import-preview { margin-top:1rem; overflow-x:auto; }
+  .import-preview table { width:100%; border-collapse:collapse; font-size:12px; }
+  .import-preview th { background:var(--text); color:#fff; padding:6px 8px; text-align:left; white-space:nowrap; }
+  .import-preview td { padding:5px 8px; border-bottom:0.5px solid var(--border); white-space:nowrap; }
+  .import-preview tr:hover td { background:var(--surface2); }
+  .import-row-ok td:first-child { border-left:3px solid var(--green); }
+  .import-row-warn td:first-child { border-left:3px solid #BA7517; }
+  .import-row-err td:first-child { border-left:3px solid var(--red); }
+  .import-tag { display:inline-block; padding:1px 6px; border-radius:99px; font-size:10px; font-weight:600; }
+  .import-tag.ok { background:var(--green-light); color:var(--green-dark); }
+  .import-tag.warn { background:#faeeda; color:#7a4200; }
+  .import-tag.err { background:var(--red-light); color:var(--red); }
 </style>
 </head>
 <body>
@@ -467,6 +484,35 @@ var selectedPayment = 'transfer';
     <img id="last-updated-avatar" class="user-avatar" src="" style="display:none">
   </div>
 
+  <!-- IMPORT SECTION (in add tab) -->
+  <div id="tab-import-section" style="display:none">
+    <div class="card">
+      <div class="card-title"><i class="ti ti-file-import" style="color:var(--green)"></i> นำเข้าข้อมูล (Import Excel)</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">รองรับไฟล์ .xlsx ที่มี columns: <code>วันที่, บริษัท, ราคา, แผนก</code> (columns อื่นๆ optional)</p>
+      <div class="import-zone" id="import-zone"
+        onclick="document.getElementById('import-file-input').click()"
+        ondragover="event.preventDefault();this.classList.add('drag')"
+        ondragleave="this.classList.remove('drag')"
+        ondrop="event.preventDefault();this.classList.remove('drag');handleImportFile(event.dataTransfer.files[0])">
+        <i class="ti ti-file-spreadsheet"></i>
+        <div style="font-size:14px;font-weight:500">คลิกหรือลากไฟล์ Excel มาวางที่นี่</div>
+        <div style="font-size:12px;margin-top:4px">.xlsx เท่านั้น</div>
+      </div>
+      <input type="file" id="import-file-input" accept=".xlsx" style="display:none" onchange="handleImportFile(this.files[0])">
+      <div id="import-status" style="font-size:13px;margin-top:8px;min-height:16px"></div>
+      <div id="import-preview" class="import-preview" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+          <div id="import-summary" style="font-size:13px"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="clearImport()"><i class="ti ti-x"></i> ยกเลิก</button>
+            <button class="btn btn-success" id="import-confirm-btn" onclick="confirmImport()"><i class="ti ti-check"></i> ยืนยัน Import</button>
+          </div>
+        </div>
+        <div id="import-table-wrap"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- TAB: รายรับ -->
   <div id="tab-income" style="display:none">
     <div class="card">
@@ -574,6 +620,14 @@ var selectedPayment = 'transfer';
 
   <!-- TAB: เพิ่มรายการ -->
   <div id="tab-add">
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-primary" id="add-mode-btn" onclick="setAddMode('form')" style="flex:1">
+        <i class="ti ti-pencil"></i> กรอกรายการ
+      </button>
+      <button class="btn" id="import-mode-btn" onclick="setAddMode('import')" style="flex:1">
+        <i class="ti ti-file-import"></i> นำเข้า Excel
+      </button>
+    </div>
     <div id="form-section">
       <div class="card">
         <div class="card-title">รายการจ่ายเงินใหม่</div>
@@ -1253,12 +1307,33 @@ function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 /* ═══════════════════════════════════════════
    TABS
    ═══════════════════════════════════════════ */
+function setAddMode(mode) {
+  const formSection = document.getElementById('form-section');
+  const confirmSection = document.getElementById('confirm-section');
+  const importSection = document.getElementById('tab-import-section');
+  const addBtn = document.getElementById('add-mode-btn');
+  const importBtn = document.getElementById('import-mode-btn');
+
+  if(mode === 'import') {
+    formSection.style.display = 'none';
+    if(confirmSection) confirmSection.style.display = 'none';
+    importSection.style.display = '';
+    addBtn.className = 'btn';
+    importBtn.className = 'btn btn-primary';
+  } else {
+    formSection.style.display = '';
+    if(confirmSection) confirmSection.style.display = 'none';
+    importSection.style.display = 'none';
+    addBtn.className = 'btn btn-primary';
+    importBtn.className = 'btn';
+  }
+}
 function switchTab(name) {
   ['add','income','slip','records','categories','export'].forEach((t,i)=>{
     document.getElementById('tab-'+t).style.display = t===name?'':'none';
     document.querySelectorAll('.tab')[i].classList.toggle('active', t===name);
   });
-  if(name==='add'){ document.getElementById('form-section').style.display=''; document.getElementById('confirm-section').style.display='none'; }
+  if(name==='add'){ setAddMode('form'); }
   if(name==='income') renderIncomeTab();
   if(name==='slip') initSlipTab();
   if(name==='records'){ renderRecords(); populateRecordCatFilter(); }
@@ -3252,6 +3327,281 @@ function renderIncomeTable() {
 
   const total = rows.reduce((s,e)=>s+e.amount,0);
   if(totalEl) totalEl.innerHTML = `รวม ${rows.length} รายการ: <span style="color:var(--green-dark)">${fmtBaht(total)}</span>`;
+}
+/* ═══════════════════════════════════════════
+   EXCEL IMPORT
+   ═══════════════════════════════════════════ */
+let importRows = []; // parsed + mapped rows ready to confirm
+
+/* Map English/short expense category names to full Thai names */
+const EXPENSE_CAT_IMPORT_MAP = {
+  'cost of goods sold': 'ต้นทุนขาย (Cost of Goods Sold)',
+  'cogs': 'ต้นทุนขาย (Cost of Goods Sold)',
+  'cost of goods': 'ต้นทุนขาย (Cost of Goods Sold)',
+  'ต้นทุนขาย': 'ต้นทุนขาย (Cost of Goods Sold)',
+  'labor': 'ค่าแรงงาน (Labor)',
+  'labour': 'ค่าแรงงาน (Labor)',
+  'ค่าแรงงาน': 'ค่าแรงงาน (Labor)',
+  'utilities': 'ค่าสาธารณูปโภค (Utilities)',
+  'ค่าสาธารณูปโภค': 'ค่าสาธารณูปโภค (Utilities)',
+  'rent': 'ค่าเช่า (Rent)',
+  'ค่าเช่า': 'ค่าเช่า (Rent)',
+  'marketing': 'การตลาด (Marketing)',
+  'การตลาด': 'การตลาด (Marketing)',
+  'equipment & maintenance': 'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)',
+  'equipment and maintenance': 'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)',
+  'equipment': 'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)',
+  'maintenance': 'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)',
+  'อุปกรณ์และซ่อมบำรุง': 'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)',
+  'general & admin': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
+  'general and admin': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
+  'general': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
+  'admin': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
+  'ค่าใช้จ่ายทั่วไป': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
+};
+
+function mapExpenseCat(raw) {
+  if(!raw) return '';
+  const key = String(raw).toLowerCase().trim();
+  // exact match
+  if(EXPENSE_CAT_IMPORT_MAP[key]) return EXPENSE_CAT_IMPORT_MAP[key];
+  // also check if it already is a full name
+  if(Object.values(EXPENSE_HINTS).find((_,i)=>Object.keys(EXPENSE_HINTS)[i].toLowerCase()===key))
+    return Object.keys(EXPENSE_HINTS).find(k=>k.toLowerCase()===key);
+  // partial match
+  for(const [k,v] of Object.entries(EXPENSE_CAT_IMPORT_MAP)) {
+    if(key.includes(k) || k.includes(key)) return v;
+  }
+  return raw; // keep original if no match
+}
+
+function parseImportDate(raw) {
+  if(!raw) return '';
+  const s = String(raw).trim();
+
+  // Already ISO: 2026-04-03
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // DD/MM/YYYY or DD-MM-YYYY (Christian year)
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m) {
+    const yr = parseInt(m[3]);
+    const y = yr > 2400 ? yr - 543 : yr;
+    return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  }
+
+  // D-M-YY or D/M/YY (Buddhist year shorthand: 69 = 2569 = 2026)
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,3})$/);
+  if(m) {
+    let yr = parseInt(m[3]);
+    // if 2-digit or 3-digit Buddhist year: 69 → 2569 → 2026, or 569 → 2569 → 2026
+    if(yr < 100) yr += 2500;
+    else if(yr < 1000) yr += 2000;
+    yr -= 543; // convert Buddhist to Christian
+    return `${yr}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  }
+
+  // Excel date serial number
+  if(!isNaN(raw) && typeof raw === 'number') {
+    // Excel serial date (days since 1900-01-01, with leap year bug)
+    const d = new Date(Math.round((raw - 25569) * 86400 * 1000));
+    if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+  }
+
+  return s; // return as-is
+}
+
+function mapCategory(raw) {
+  if(!raw) return data.categories[0]||'';
+  const s = String(raw).trim();
+  // exact match
+  const exact = data.categories.find(c=>c===s);
+  if(exact) return exact;
+  // case-insensitive
+  const ci = data.categories.find(c=>c.toLowerCase()===s.toLowerCase());
+  if(ci) return ci;
+  return s; // may not match — will be flagged as warning
+}
+
+function detectColumns(headers) {
+  const h = headers.map(s=>String(s||'').toLowerCase().trim());
+  const find = (...keys) => {
+    for(const k of keys) {
+      const i = h.findIndex(x=>x.includes(k));
+      if(i>=0) return headers[i];
+    }
+    return null;
+  };
+  return {
+    date:     find('วันที่','date','dt','วัน'),
+    company:  find('บริษัท','company','ร้านค้า','vendor','supplier'),
+    transfer: find('จ่ายให้','transfer','payee','โอนให้'),
+    amount:   find('ราคา','amount','จำนวน','price','ยอด'),
+    category: find('แผนก','category','department','dept'),
+    expenseCat: find('ประเภทค่าใช้จ่าย','expense','type','expensecat'),
+    details:  find('หมายเหตุ','note','details','remark','memo','หมาย'),
+    payment:  find('วิธีชำระ','payment','cash','transfer method'),
+  };
+}
+
+async function handleImportFile(file) {
+  if(!file) return;
+  if(!file.name.endsWith('.xlsx')){
+    document.getElementById('import-status').innerHTML = '<span style="color:var(--red)">✗ รองรับเฉพาะไฟล์ .xlsx เท่านั้น</span>';
+    return;
+  }
+  if(!window.XLSX || window.XLSX_FAILED) {
+    document.getElementById('import-status').innerHTML = '<span style="color:var(--red)">✗ XLSX library ยังไม่โหลด — กรุณารีเฟรชหน้าแล้วลองใหม่</span>';
+    return;
+  }
+
+  document.getElementById('import-status').innerHTML = '<span class="spinner" style="margin-right:6px"></span>กำลังอ่านไฟล์...';
+
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:false});
+    const wsName = wb.SheetNames[0];
+    const ws = wb.Sheets[wsName];
+    const raw = XLSX.utils.sheet_to_json(ws, {defval:'', header:1});
+
+    if(raw.length < 2) {
+      document.getElementById('import-status').innerHTML = '<span style="color:var(--red)">✗ ไม่พบข้อมูลในไฟล์</span>';
+      return;
+    }
+
+    const headers = raw[0].map(h=>String(h||''));
+    const colMap = detectColumns(headers);
+
+    if(!colMap.date || !colMap.amount) {
+      document.getElementById('import-status').innerHTML =
+        `<span style="color:var(--red)">✗ ไม่พบ column ที่จำเป็น — ต้องมี "วันที่" และ "ราคา"<br>พบ columns: ${headers.join(', ')}</span>`;
+      return;
+    }
+
+    importRows = [];
+    const errors = [], warnings = [];
+
+    raw.slice(1).forEach((row, ri) => {
+      const get = col => col ? String(row[headers.indexOf(col)]||'').trim() : '';
+      const rawDate   = row[headers.indexOf(colMap.date)];
+      const rawAmount = row[headers.indexOf(colMap.amount)];
+
+      const dt = parseImportDate(rawDate);
+      const amount = parseFloat(String(rawAmount).replace(/,/g,''));
+      const company = get(colMap.company);
+      const transfer = get(colMap.transfer) || company;
+      const rawCat = get(colMap.category);
+      const category = mapCategory(rawCat) || data.categories[0]||'';
+      const expenseCat = mapExpenseCat(get(colMap.expenseCat));
+      const details = get(colMap.details);
+      const payRaw = get(colMap.payment).toLowerCase();
+      const paymentMethod = payRaw.includes('cash')||payRaw.includes('เงินสด') ? 'cash' : 'transfer';
+
+      let status = 'ok';
+      const issues = [];
+
+      if(!dt || dt.length < 8) { issues.push('วันที่ไม่ถูกต้อง'); status='err'; }
+      if(isNaN(amount)||amount<=0) { issues.push('ราคาไม่ถูกต้อง'); status='err'; }
+      if(!data.categories.includes(category)) { issues.push('แผนก "'+rawCat+'" ไม่ตรง'); if(status!=='err') status='warn'; }
+      if(!expenseCat || !Object.keys(EXPENSE_HINTS).includes(expenseCat)) {
+        if(expenseCat) issues.push('ประเภทค่าใช้จ่ายไม่ตรง'); if(status!=='err') status='warn';
+      }
+
+      importRows.push({ dt, amount, company, transfer, category, expenseCat, details, paymentMethod, status, issues, _row:ri+2 });
+    });
+
+    renderImportPreview();
+
+  } catch(err) {
+    console.error('Import error:', err);
+    document.getElementById('import-status').innerHTML = `<span style="color:var(--red)">✗ อ่านไฟล์ไม่สำเร็จ: ${err.message}</span>`;
+  }
+}
+
+function renderImportPreview() {
+  const ok   = importRows.filter(r=>r.status==='ok').length;
+  const warn = importRows.filter(r=>r.status==='warn').length;
+  const err  = importRows.filter(r=>r.status==='err').length;
+
+  document.getElementById('import-status').innerHTML = '';
+  document.getElementById('import-summary').innerHTML =
+    `พบ <strong>${importRows.length}</strong> แถว &nbsp;|&nbsp; ` +
+    `<span style="color:var(--green-dark)">✓ OK: ${ok}</span> &nbsp; ` +
+    `<span style="color:#BA7517">⚠ Warning: ${warn}</span> &nbsp; ` +
+    `<span style="color:var(--red)">✗ Error: ${err}</span>` +
+    (err>0 ? `<br><small style="color:var(--text2)">แถวที่มี Error จะไม่ถูก import</small>` : '');
+
+  const btn = document.getElementById('import-confirm-btn');
+  if(btn) btn.disabled = (ok+warn)===0;
+
+  const html = `<table>
+    <thead><tr>
+      <th>สถานะ</th><th>แถว</th><th>วันที่</th><th>แผนก</th><th>บริษัท</th>
+      <th style="text-align:right">ราคา</th><th>ประเภทค่าใช้จ่าย</th><th>หมายเหตุ</th><th>วิธีชำระ</th>
+    </tr></thead>
+    <tbody>${importRows.map(r=>`
+      <tr class="import-row-${r.status}">
+        <td>${r.status==='ok'?'<span class="import-tag ok">✓ OK</span>':
+          r.status==='warn'?`<span class="import-tag warn">⚠ ${r.issues.join(', ')}</span>`:
+          `<span class="import-tag err">✗ ${r.issues.join(', ')}</span>`}</td>
+        <td style="color:var(--text2)">${r._row}</td>
+        <td>${esc(r.dt)}</td>
+        <td><span style="font-weight:500">${esc(r.category)}</span></td>
+        <td>${esc(r.company)}</td>
+        <td style="text-align:right;font-weight:500">${isNaN(r.amount)?'—':fmtBaht(r.amount)}</td>
+        <td style="font-size:11px;color:var(--text2)">${esc(r.expenseCat||'—')}</td>
+        <td style="font-size:11px;color:var(--text2)">${esc(r.details||'—')}</td>
+        <td>${r.paymentMethod==='cash'?'💵 Cash':'🏦 Transfer'}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+
+  document.getElementById('import-table-wrap').innerHTML = html;
+  document.getElementById('import-preview').style.display = '';
+}
+
+function confirmImport() {
+  const valid = importRows.filter(r=>r.status==='ok'||r.status==='warn');
+  if(!valid.length){ alert('ไม่มีแถวที่สามารถ import ได้'); return; }
+
+  const who = driveState.currentUser ? driveState.currentUser.name : 'Import';
+  const nowISO = new Date().toISOString();
+  let saved = 0;
+
+  valid.forEach(r=>{
+    const entry = {
+      id: Date.now()+Math.random(),
+      dt: r.dt, amount: r.amount,
+      transfer: r.transfer||r.company||'',
+      company: r.company||'',
+      category: data.categories.includes(r.category) ? r.category : (data.categories[0]||''),
+      expenseCat: r.expenseCat||'',
+      details: r.details||'',
+      paymentMethod: r.paymentMethod||'transfer',
+      createdBy: who, createdAt: nowISO
+    };
+    data.entries.unshift(entry);
+    if(entry.company && !data.companies.includes(entry.company)) data.companies.push(entry.company);
+    // deduct cash pocket if needed
+    if(entry.paymentMethod==='cash' && entry.category) {
+      if(!data.cashPockets) data.cashPockets={};
+      data.cashPockets[entry.category] = Math.max(0,(data.cashPockets[entry.category]||0)-entry.amount);
+    }
+    saved++;
+  });
+
+  save();
+  clearImport();
+  showToast(`Import สำเร็จ ${saved} รายการ ✓`);
+  switchTab('records');
+}
+
+function clearImport() {
+  importRows = [];
+  document.getElementById('import-preview').style.display='none';
+  document.getElementById('import-status').innerHTML='';
+  document.getElementById('import-table-wrap').innerHTML='';
+  const fi = document.getElementById('import-file-input');
+  if(fi) fi.value='';
 }
 </script>
 </body>
