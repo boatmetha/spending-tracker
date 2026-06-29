@@ -331,6 +331,20 @@ var selectedPayment = 'transfer';
   .import-tag.ok { background:var(--green-light); color:var(--green-dark); }
   .import-tag.warn { background:#faeeda; color:#7a4200; }
   .import-tag.err { background:var(--red-light); color:var(--red); }
+
+  /* ── ACCOUNT 4721 ── */
+  .acct-balance-card { background:var(--text); color:#fff; border-radius:var(--radius-lg); padding:1.5rem; margin-bottom:1rem; }
+  .acct-balance-label { font-size:12px; opacity:.7; margin-bottom:4px; }
+  .acct-balance-value { font-size:36px; font-weight:700; letter-spacing:-1px; }
+  .acct-balance-meta { font-size:12px; opacity:.6; margin-top:6px; }
+  .acct-type-toggle { display:flex; gap:8px; margin-bottom:1rem; }
+  .acct-type-btn { flex:1; padding:10px; border:0.5px solid var(--border2); border-radius:var(--radius); font-size:14px; font-weight:600; cursor:pointer; background:var(--surface); color:var(--text2); font-family:inherit; transition:all .15s; }
+  .acct-type-btn.in  { background:#1a5276; color:#fff; border-color:transparent; }
+  .acct-type-btn.out { background:var(--red); color:#fff; border-color:transparent; }
+  .acct-type-btn:not(.in):not(.out):hover { background:var(--surface2); }
+  .acct-row-in  td { color:#1a5276; }
+  .acct-row-out td { color:var(--red); }
+  .acct-bal-col { font-weight:600; }
 </style>
 </head>
 <body>
@@ -455,6 +469,7 @@ var selectedPayment = 'transfer';
 
   <!-- TABS -->
   <div class="tabs">
+    <button class="tab" onclick="switchTab('acct4721')" style="font-weight:700">💳 4721</button>
     <button class="tab active" onclick="switchTab('add')"><i class="ti ti-plus"></i> เพิ่มรายการ</button>
     <button class="tab" onclick="switchTab('income')"><i class="ti ti-trending-up"></i> รายรับ</button>
     <button class="tab" onclick="switchTab('slip')"><i class="ti ti-scan"></i> อ่านสลิป</button>
@@ -614,6 +629,96 @@ var selectedPayment = 'transfer';
           <button class="btn" onclick="clearAllSlips()"><i class="ti ti-trash"></i> ล้างทั้งหมด</button>
           <button class="btn btn-success" onclick="confirmAllSlips()"><i class="ti ti-check"></i> ยืนยันบันทึกทั้งหมด</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: บัญชี 4721 -->
+  <div id="tab-acct4721" style="display:none">
+    <!-- Balance card -->
+    <div class="acct-balance-card" id="acct4721-balance-card">
+      <div class="acct-balance-label">บัญชี 4721 — ยอดคงเหลือ</div>
+      <div class="acct-balance-value" id="acct4721-balance">฿0.00</div>
+      <div class="acct-balance-meta" id="acct4721-meta"></div>
+    </div>
+
+    <!-- Action bar: import + export -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn" onclick="document.getElementById('acct4721-import-input').click()" style="font-size:12px">
+        <i class="ti ti-file-import"></i> นำเข้า Excel
+      </button>
+      <input type="file" id="acct4721-import-input" accept=".xlsx" style="display:none" onchange="handleAcct4721Import(this.files[0])">
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn" onclick="exportAcct4721('month')" style="font-size:12px"><i class="ti ti-calendar-month"></i> ส่งออกเดือนนี้</button>
+        <button class="btn" onclick="exportAcct4721('year')"  style="font-size:12px"><i class="ti ti-calendar"></i> ส่งออกปีนี้</button>
+        <button class="btn btn-primary" onclick="exportAcct4721('all')" style="font-size:12px"><i class="ti ti-download"></i> ส่งออกทั้งหมด</button>
+      </div>
+    </div>
+    <div id="acct4721-import-status" style="font-size:13px;margin-bottom:8px;min-height:16px"></div>
+
+    <!-- Entry form -->
+    <div class="card">
+      <div class="card-title">บันทึกรายการ</div>
+      <div class="acct-type-toggle">
+        <button class="acct-type-btn" id="acct-btn-in" onclick="setAcct4721Type('in')">
+          ＋ เงินเข้า
+        </button>
+        <button class="acct-type-btn" id="acct-btn-out" onclick="setAcct4721Type('out')">
+          － จ่ายออก
+        </button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label><i class="ti ti-calendar" style="font-size:12px;margin-right:4px"></i>วันที่</label>
+          <input type="date" id="acct4721-date">
+        </div>
+        <div class="form-group">
+          <label><i class="ti ti-currency-baht" style="font-size:12px;margin-right:4px"></i>จำนวนเงิน (฿)</label>
+          <input type="number" id="acct4721-amount" placeholder="0.00" min="0" step="0.01">
+        </div>
+        <div class="form-group full">
+          <label><i class="ti ti-building" style="font-size:12px;margin-right:4px"></i>บริษัท / ร้านค้า</label>
+          <div style="position:relative">
+            <input type="text" id="acct4721-company" placeholder="ชื่อบริษัทหรือร้านค้า..."
+              oninput="onAcct4721CompanyInput()"
+              onblur="setTimeout(()=>document.getElementById('acct4721-company-drop').style.display='none',150)">
+            <div id="acct4721-company-drop" class="dropdown" style="display:none"></div>
+          </div>
+        </div>
+        <div class="form-group full">
+          <label><i class="ti ti-notes" style="font-size:12px;margin-right:4px"></i>หมายเหตุ (ไม่บังคับ)</label>
+          <input type="text" id="acct4721-note" placeholder="รายละเอียดเพิ่มเติม...">
+        </div>
+      </div>
+      <div style="margin-top:1rem">
+        <button class="btn btn-success" onclick="saveAcct4721()"><i class="ti ti-check"></i> บันทึก</button>
+      </div>
+    </div>
+
+    <!-- Transaction table -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="card-title" style="margin-bottom:0">รายการทั้งหมด</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="acct4721-filter" onchange="renderAcct4721Table()" style="padding:6px 8px;font-size:12px;font-family:inherit">
+            <option value="">ทุกประเภท</option>
+            <option value="in">เงินเข้า</option>
+            <option value="out">จ่ายออก</option>
+          </select>
+          <input type="month" id="acct4721-filter-month" onchange="renderAcct4721Table()" style="padding:6px 8px;font-size:12px;font-family:inherit">
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="records-table" id="acct4721-table">
+          <thead><tr>
+            <th>วันที่</th><th>ประเภท</th><th>บริษัท / ร้านค้า</th><th>หมายเหตุ</th>
+            <th style="text-align:right">เงินเข้า (+)</th>
+            <th style="text-align:right">จ่ายออก (-)</th>
+            <th style="text-align:right">คงเหลือ</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="acct4721-tbody"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -834,7 +939,7 @@ const SHARED_FILE_ID = '1eXnI_EI3OrjF1kVu-bZUJbntdmAtt9GH'; // Shared DB file ID
    ═══════════════════════════════════════════ */
 const PALETTE = ['#1D9E75','#D85A30','#378ADD','#BA7517','#D4537E','#639922','#7F77DD','#3C3489','#885500','#185FA5'];
 const DEFAULT_CATS = ['Milkbar','Taihu','Bakelab','Nooch Coffee','ครัวร้อน'];
-let data = { entries: [], categories: [...DEFAULT_CATS], companies: [], _version: 0, _lastUpdatedBy: '', _lastUpdatedAt: '', _lastUpdatedAvatar: '', cashPockets: {}, topupHistory: [], incomes: [], incomeSources: [] };
+let data = { entries: [], categories: [...DEFAULT_CATS], companies: [], _version: 0, _lastUpdatedBy: '', _lastUpdatedAt: '', _lastUpdatedAvatar: '', cashPockets: {}, topupHistory: [], incomes: [], incomeSources: [], acct4721: [] };
 let pendingEntry = null;
 let driveState = { signedIn: false, fileId: null, folderId: null, backupFolderId: null, tokenClient: null, gapiReady: false, pendingSync: false, syncFailCount: 0, retryTimer: null, lastBackupTime: 0, dbVersion: 0, currentUser: null, tokenRefreshTimer: null };
 
@@ -864,6 +969,7 @@ function loadLocal() {
   if(!data.topupHistory)   data.topupHistory = [];
   if(!data.incomes)        data.incomes = [];
   if(!data.incomeSources)  data.incomeSources = [];
+  if(!data.acct4721)       data.acct4721 = [];
 }
 
 /* ═══════════════════════════════════════════
@@ -1263,6 +1369,7 @@ async function loadFromDrive() {
         if(!data.topupHistory)  data.topupHistory = [];
         if(!data.incomes)       data.incomes = [];
         if(!data.incomeSources) data.incomeSources = [];
+        if(!data.acct4721)      data.acct4721 = [];
         if(!data.companies)     data.companies = [];
         if(!data.categories || !data.categories.length) data.categories = [...DEFAULT_CATS];
         // rename old category name
@@ -1329,10 +1436,11 @@ function setAddMode(mode) {
   }
 }
 function switchTab(name) {
-  ['add','income','slip','records','categories','export'].forEach((t,i)=>{
+  ['acct4721','add','income','slip','records','categories','export'].forEach((t,i)=>{
     document.getElementById('tab-'+t).style.display = t===name?'':'none';
     document.querySelectorAll('.tab')[i].classList.toggle('active', t===name);
   });
+  if(name==='acct4721') renderAcct4721();
   if(name==='add'){ setAddMode('form'); }
   if(name==='income') renderIncomeTab();
   if(name==='slip') initSlipTab();
@@ -3602,6 +3710,396 @@ function clearImport() {
   document.getElementById('import-table-wrap').innerHTML='';
   const fi = document.getElementById('import-file-input');
   if(fi) fi.value='';
+}
+/* ───────────────────────────────────────────
+   ACCOUNT 4721 — IMPORT
+   ─────────────────────────────────────────── */
+async function handleAcct4721Import(file) {
+  const statusEl = document.getElementById('acct4721-import-status');
+  if(!file) return;
+  if(!file.name.endsWith('.xlsx')) {
+    statusEl.innerHTML = '<span style="color:var(--red)">✗ รองรับเฉพาะ .xlsx</span>'; return;
+  }
+  if(!window.XLSX || window.XLSX_FAILED) {
+    statusEl.innerHTML = '<span style="color:var(--red)">✗ XLSX library ยังไม่โหลด — รีเฟรชแล้วลองใหม่</span>'; return;
+  }
+  statusEl.innerHTML = '<span class="spinner" style="margin-right:6px"></span>กำลังอ่านไฟล์...';
+  try {
+    const buf = await file.arrayBuffer();
+    const wb  = XLSX.read(buf, {type:'array', cellDates:false});
+    const ws  = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, {defval:'', header:1});
+    if(raw.length < 2) { statusEl.innerHTML='<span style="color:var(--red)">✗ ไม่พบข้อมูล</span>'; return; }
+
+    const headers = raw[0].map(h=>String(h||'').toLowerCase().trim());
+    const findCol = (...keys) => { for(const k of keys){ const i=headers.findIndex(x=>x.includes(k)); if(i>=0) return i; } return -1; };
+
+    const iDate   = findCol('วันที่','date','dt');
+    const iType   = findCol('ประเภท','type','in/out','ประเภ');
+    const iComp   = findCol('บริษัท','company','ร้านค้า','vendor');
+    const iAmt    = findCol('จำนวน','amount','ราคา','price');
+    const iNote   = findCol('หมายเหตุ','note','remark','memo');
+
+    if(iDate<0||iAmt<0) {
+      statusEl.innerHTML='<span style="color:var(--red)">✗ ไม่พบ column "วันที่" หรือ "จำนวนเงิน"</span>'; return;
+    }
+
+    const who = driveState.currentUser ? driveState.currentUser.name : 'Import';
+    const nowISO = new Date().toISOString();
+    let saved=0, skipped=0;
+    if(!data.acct4721) data.acct4721=[];
+
+    raw.slice(1).forEach(row=>{
+      const rawDate = row[iDate];
+      const rawAmt  = row[iAmt];
+      const rawType = iType>=0 ? String(row[iType]||'').trim() : '';
+      const company = iComp>=0 ? String(row[iComp]||'').trim() : '';
+      const note    = iNote>=0 ? String(row[iNote]||'').trim() : '';
+
+      const dt     = parseImportDate(rawDate);
+      const amount = parseFloat(String(rawAmt).replace(/,/g,''));
+      if(!dt || isNaN(amount) || amount<=0) { skipped++; return; }
+
+      // map type: เงินเข้า → 'in', จ่ายออก → 'out', default 'in'
+      let type = 'in';
+      const rt = rawType.toLowerCase();
+      if(rt.includes('ออก')||rt.includes('out')||rt.includes('จ่าย')) type='out';
+
+      data.acct4721.push({
+        id: Date.now()+Math.random(), dt, amount, company, note, type,
+        createdBy: who, createdAt: nowISO
+      });
+      if(company && !acct4721Companies.includes(company)) acct4721Companies.push(company);
+      saved++;
+    });
+
+    save();
+    renderAcct4721Balance();
+    renderAcct4721Table();
+    // reset input
+    document.getElementById('acct4721-import-input').value='';
+    statusEl.innerHTML = `<span style="color:var(--green-dark)">✓ Import สำเร็จ ${saved} รายการ${skipped?' (ข้าม '+skipped+' แถว)':''}</span>`;
+    setTimeout(()=>statusEl.innerHTML='', 4000);
+  } catch(err) {
+    console.error(err);
+    statusEl.innerHTML = `<span style="color:var(--red)">✗ อ่านไฟล์ไม่สำเร็จ: ${err.message}</span>`;
+  }
+}
+
+/* ───────────────────────────────────────────
+   ACCOUNT 4721 — EXPORT EXCEL
+   ─────────────────────────────────────────── */
+function exportAcct4721(period) {
+  if(!data.acct4721 || !data.acct4721.length) { alert('ยังไม่มีรายการใน Account 4721'); return; }
+
+  const now = new Date();
+  const curY = now.getFullYear();
+  const curM = String(now.getMonth()+1).padStart(2,'0');
+
+  let txns = data.acct4721.slice().sort((a,b)=>a.dt.localeCompare(b.dt));
+  let periodLabel = 'ทั้งหมด';
+  let filename    = 'Account4721_All';
+
+  if(period==='month'){
+    txns = txns.filter(t=>t.dt.slice(0,7)===`${curY}-${curM}`);
+    periodLabel = `${THAI_MONTH_NAMES[now.getMonth()]} ${curY}`;
+    filename    = `Account4721_${curY}-${curM}`;
+  } else if(period==='year'){
+    txns = txns.filter(t=>t.dt.slice(0,4)===String(curY));
+    periodLabel = `ปี ${curY}`;
+    filename    = `Account4721_${curY}`;
+  }
+
+  if(!txns.length){ alert(`ไม่มีข้อมูลใน${periodLabel}`); return; }
+
+  const xmlEsc = s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const strMap={},strs=[];
+  const si=v=>{const k=String(v);if(k in strMap)return strMap[k];strMap[k]=strs.length;strs.push(k);return strs.length-1;};
+  const col=n=>{let s='';n++;while(n>0){s=String.fromCharCode(64+(n%26||26))+s;n=Math.floor((n-1)/26);}return s;};
+  const T=(addr,val,s=8)=>`<c r="${addr}" s="${s}" t="s"><v>${si(String(val))}</v></c>`;
+  const N=(addr,val,s=4)=>`<c r="${addr}" s="${s}"><v>${parseFloat(val)||0}</v></c>`;
+
+  const stylesXml=`<?xml version="1.0" encoding="UTF-8"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts>
+  <fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1A3A5C"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1A5276"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F1"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE2EFDA"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFCE4D6"/></patternFill></fill></fills>
+  <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFB8CCE4"/></left><right style="thin"><color rgb="FFB8CCE4"/></right><top style="thin"><color rgb="FFB8CCE4"/></top><bottom style="thin"><color rgb="FFB8CCE4"/></bottom></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="9">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center"/></xf>
+    <xf numFmtId="4"  fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="4"  fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="4"  fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="4"  fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
+  </cellXfs>
+</styleSheet>`;
+
+  const sheetXmls=[], sheetNames=[];
+
+  /* ── Sheet 1: All Transactions ── */
+  {
+    const hdr=['วันที่','ประเภท','บริษัท / ร้านค้า','หมายเหตุ','เงินเข้า (+) ฿','จ่ายออก (-) ฿','คงเหลือ ฿','บันทึกโดย'];
+    let xml=`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`;
+    xml+=`<cols><col min="1" max="1" width="14"/><col min="2" max="2" width="12"/><col min="3" max="3" width="28"/><col min="4" max="4" width="24"/><col min="5" max="7" width="16"/><col min="8" max="8" width="16"/></cols>`;
+    xml+='<sheetData>';
+    xml+=`<row r="1" ht="28" customHeight="1">${T('A1','💳 Account 4721 — '+periodLabel,7)}</row><row r="2"/>`;
+    xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+    let running=0;
+    txns.forEach((t,ri)=>{
+      const r=ri+4;
+      running+=(t.type==='in'?t.amount:-t.amount);
+      const runRound=Math.round(running*100)/100;
+      xml+=`<row r="${r}">
+        ${T(`A${r}`,t.dt,8)}
+        ${T(`B${r}`,t.type==='in'?'เงินเข้า':'จ่ายออก',8)}
+        ${T(`C${r}`,t.company||'',8)}
+        ${T(`D${r}`,t.note||'',8)}
+        ${t.type==='in' ?N(`E${r}`,t.amount,5):T(`E${r}`,'',8)}
+        ${t.type==='out'?N(`F${r}`,t.amount,6):T(`F${r}`,'',8)}
+        ${N(`G${r}`,runRound,runRound>=0?4:6)}
+        ${T(`H${r}`,t.createdBy||'',8)}
+      </row>`;
+    });
+    const totalIn =txns.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
+    const totalOut=txns.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
+    const lr=txns.length+4;
+    xml+=`<row r="${lr}">${T(`A${lr}`,'',3)}${T(`B${lr}`,'',3)}${T(`C${lr}`,'',3)}${T(`D${lr}`,'รวม',3)}${N(`E${lr}`,totalIn,3)}${N(`F${lr}`,totalOut,3)}${N(`G${lr}`,Math.round(running*100)/100,3)}${T(`H${lr}`,'',3)}</row>`;
+    xml+='</sheetData></worksheet>';
+    sheetXmls.push(xml); sheetNames.push('รายการ');
+  }
+
+  /* ── Sheet 2: Monthly Summary ── */
+  {
+    const months=new Set((period==='year'||period==='all')?txns.map(t=>t.dt.slice(0,7)):[]);
+    if(period==='month') months.add(`${curY}-${curM}`);
+    const sortedMonths=[...months].sort();
+    if(sortedMonths.length>1||period!=='month'){
+      const hdr=['เดือน','เงินเข้ารวม (฿)','จ่ายออกรวม (฿)','สุทธิ (฿)','คงเหลือสะสม (฿)'];
+      let xml=`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`;
+      xml+=`<cols><col min="1" max="1" width="18"/><col min="2" max="5" width="18"/></cols>`;
+      xml+='<sheetData>';
+      xml+=`<row r="1" ht="28" customHeight="1">${T('A1','📅 สรุปรายเดือน — Account 4721',7)}</row><row r="2"/>`;
+      xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+
+      // compute running from ALL data for cumulative balance
+      const allSorted=(data.acct4721||[]).slice().sort((a,b)=>a.dt.localeCompare(b.dt));
+      let cumBal=0;
+      const cumByMonth={};
+      allSorted.forEach(t=>{
+        const m=t.dt.slice(0,7);
+        cumByMonth[m]=(cumByMonth[m]||0)+(t.type==='in'?t.amount:-t.amount);
+      });
+      let runBal=0;
+      sortedMonths.forEach((month,ri)=>{
+        const r=ri+4;
+        const mTxns=txns.filter(t=>t.dt.slice(0,7)===month);
+        const mIn =mTxns.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
+        const mOut=mTxns.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
+        const mNet=mIn-mOut;
+        runBal+=mNet;
+        const [y,m2]=month.split('-');
+        xml+=`<row r="${r}">${T(`A${r}`,THAI_MONTH_NAMES[parseInt(m2)-1]+' '+y,8)}${N(`B${r}`,mIn,5)}${N(`C${r}`,mOut,6)}${N(`D${r}`,mNet,mNet>=0?5:6)}${N(`E${r}`,Math.round(runBal*100)/100,4)}</row>`;
+      });
+      const lr=sortedMonths.length+4;
+      const gIn=txns.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
+      const gOut=txns.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
+      xml+=`<row r="${lr}">${T(`A${lr}`,'รวม',3)}${N(`B${lr}`,gIn,3)}${N(`C${lr}`,gOut,3)}${N(`D${lr}`,gIn-gOut,3)}${T(`E${lr}`,'',3)}</row>`;
+      xml+='</sheetData></worksheet>';
+      sheetXmls.push(xml); sheetNames.push('สรุปรายเดือน');
+    }
+  }
+
+  /* ── Sheet 3: Yearly Summary (all-time only) ── */
+  if(period==='all'){
+    const years=[...new Set(txns.map(t=>t.dt.slice(0,4)))].sort();
+    if(years.length){
+      const hdr=['ปี','เงินเข้ารวม (฿)','จ่ายออกรวม (฿)','สุทธิ (฿)'];
+      let xml=`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`;
+      xml+=`<cols><col min="1" max="1" width="10"/><col min="2" max="4" width="20"/></cols>`;
+      xml+='<sheetData>';
+      xml+=`<row r="1" ht="28" customHeight="1">${T('A1','📊 สรุปรายปี — Account 4721',7)}</row><row r="2"/>`;
+      xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
+      years.forEach((y,ri)=>{
+        const r=ri+4;
+        const yIn =txns.filter(t=>t.dt.startsWith(y)&&t.type==='in').reduce((s,t)=>s+t.amount,0);
+        const yOut=txns.filter(t=>t.dt.startsWith(y)&&t.type==='out').reduce((s,t)=>s+t.amount,0);
+        xml+=`<row r="${r}">${T(`A${r}`,y,8)}${N(`B${r}`,yIn,5)}${N(`C${r}`,yOut,6)}${N(`D${r}`,yIn-yOut,yIn-yOut>=0?5:6)}</row>`;
+      });
+      const lr=years.length+4;
+      const gIn=txns.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
+      const gOut=txns.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
+      xml+=`<row r="${lr}">${T(`A${lr}`,'รวม',3)}${N(`B${lr}`,gIn,3)}${N(`C${lr}`,gOut,3)}${N(`D${lr}`,gIn-gOut,3)}</row>`;
+      xml+='</sheetData></worksheet>';
+      sheetXmls.push(xml); sheetNames.push('สรุปรายปี');
+    }
+  }
+
+  /* ── Build zip ── */
+  const ssXml='<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="'+strs.length+'" uniqueCount="'+strs.length+'">'+strs.map(s=>'<si><t xml:space="preserve">'+xmlEsc(s)+'</t></si>').join('')+'</sst>';
+  const wbXml='<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheetNames.map((n,i)=>`<sheet name="${xmlEsc(n)}" sheetId="${i+1}" r:id="rId${i+2}"/>`).join('')+'</sheets></workbook>';
+  const wbRels='<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/><Relationship Id="rId_s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'+sheetNames.map((_,i)=>`<Relationship Id="rId${i+2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+'</Relationships>';
+  const rootRels='<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+  const ct='<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheetNames.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>';
+
+  const files=[['[Content_Types].xml',ct],['_rels/.rels',rootRels],['xl/workbook.xml',wbXml],['xl/_rels/workbook.xml.rels',wbRels],['xl/sharedStrings.xml',ssXml],['xl/styles.xml',stylesXml],...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',xml])];
+  const wb = zipFiles(files);
+  const blob=new Blob([wb],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=filename+'.xlsx';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{try{URL.revokeObjectURL(url);a.remove();}catch(x){}},1500);
+  showToast(`ส่งออก Account 4721 — ${periodLabel} ✓`);
+}
+</script>
+</body>
+</html>
+var acct4721Type = 'in'; // 'in' or 'out'
+var acct4721Companies = []; // autocomplete list
+
+function renderAcct4721() {
+  if(!data.acct4721) data.acct4721 = [];
+  // Set default date
+  const dateEl = document.getElementById('acct4721-date');
+  if(dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
+  // Default type
+  setAcct4721Type('in');
+  renderAcct4721Balance();
+  renderAcct4721Table();
+}
+
+function setAcct4721Type(type) {
+  acct4721Type = type;
+  const btnIn  = document.getElementById('acct-btn-in');
+  const btnOut = document.getElementById('acct-btn-out');
+  if(btnIn)  btnIn.className  = 'acct-type-btn' + (type==='in'  ? ' in'  : '');
+  if(btnOut) btnOut.className = 'acct-type-btn' + (type==='out' ? ' out' : '');
+}
+
+function renderAcct4721Balance() {
+  const txns = data.acct4721 || [];
+  const totalIn  = txns.reduce((s,t)=>t.type==='in'  ? s+t.amount : s, 0);
+  const totalOut = txns.reduce((s,t)=>t.type==='out' ? s+t.amount : s, 0);
+  const balance  = Math.round((totalIn - totalOut)*100)/100;
+
+  const balEl   = document.getElementById('acct4721-balance');
+  const metaEl  = document.getElementById('acct4721-meta');
+  const cardEl  = document.getElementById('acct4721-balance-card');
+
+  if(balEl) balEl.textContent = fmtBaht(balance);
+  if(metaEl) metaEl.textContent = `เงินเข้ารวม ${fmtBaht(totalIn)}  |  จ่ายออกรวม ${fmtBaht(totalOut)}  |  ${txns.length} รายการ`;
+  if(cardEl) {
+    cardEl.style.background = balance >= 0 ? '#1a3a5c' : 'var(--red)';
+  }
+}
+
+function renderAcct4721Table() {
+  const filterType  = (document.getElementById('acct4721-filter')||{}).value || '';
+  const filterMonth = (document.getElementById('acct4721-filter-month')||{}).value || '';
+  let txns = (data.acct4721||[]).slice().sort((a,b)=>a.dt.localeCompare(b.dt));
+
+  // Filter
+  if(filterType)  txns = txns.filter(t=>t.type===filterType);
+  if(filterMonth) txns = txns.filter(t=>t.dt.slice(0,7)===filterMonth);
+
+  const tbody = document.getElementById('acct4721-tbody');
+  if(!tbody) return;
+
+  if(!txns.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text2);padding:1.5rem">ยังไม่มีรายการ</td></tr>`;
+    return;
+  }
+
+  // Build running balance
+  let running = 0;
+  const rows = txns.map(t=>{
+    running += t.type==='in' ? t.amount : -t.amount;
+    return {...t, running: Math.round(running*100)/100};
+  }).reverse(); // newest first for display
+
+  tbody.innerHTML = rows.map(t=>`
+    <tr class="acct-row-${t.type}">
+      <td>${esc(t.dt)}</td>
+      <td><span style="font-weight:600;color:${t.type==='in'?'#1a5276':'var(--red)'}">
+        ${t.type==='in' ? '＋ เงินเข้า' : '－ จ่ายออก'}
+      </span></td>
+      <td style="font-weight:500">${esc(t.company||'—')}</td>
+      <td style="font-size:12px;color:var(--text2)">${esc(t.note||'—')}</td>
+      <td style="text-align:right;color:#1a5276;font-weight:500">${t.type==='in'  ? fmtBaht(t.amount) : '—'}</td>
+      <td style="text-align:right;color:var(--red);font-weight:500">${t.type==='out' ? fmtBaht(t.amount) : '—'}</td>
+      <td style="text-align:right;font-weight:700;color:${t.running>=0?'var(--text)':'var(--red)'}" class="acct-bal-col">${fmtBaht(t.running)}</td>
+      <td><button class="del-row" onclick="deleteAcct4721(${t.id})" title="ลบ"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('');
+}
+
+function saveAcct4721() {
+  const dt      = document.getElementById('acct4721-date').value;
+  const amount  = parseFloat(document.getElementById('acct4721-amount').value);
+  const company = document.getElementById('acct4721-company').value.trim();
+  const note    = document.getElementById('acct4721-note').value.trim();
+
+  if(!dt)             { alert('กรุณาเลือกวันที่'); return; }
+  if(isNaN(amount)||amount<=0) { alert('กรุณากรอกจำนวนเงิน'); return; }
+  if(!company)        { alert('กรุณากรอกชื่อบริษัท/ร้านค้า'); return; }
+
+  if(!data.acct4721) data.acct4721 = [];
+
+  const entry = {
+    id: Date.now()+Math.random(),
+    dt, amount, company, note,
+    type: acct4721Type,
+    createdBy: driveState.currentUser ? driveState.currentUser.name : 'Unknown',
+    createdAt: new Date().toISOString()
+  };
+  data.acct4721.push(entry);
+
+  // Update autocomplete
+  if(company && !acct4721Companies.includes(company)) acct4721Companies.push(company);
+
+  save();
+  // Clear form
+  document.getElementById('acct4721-amount').value = '';
+  document.getElementById('acct4721-company').value = '';
+  document.getElementById('acct4721-note').value = '';
+  renderAcct4721Balance();
+  renderAcct4721Table();
+  showToast(`บันทึกแล้ว ${acct4721Type==='in'?'เงินเข้า':'จ่ายออก'} ฿${fmtBahtShort(amount)} ✓`);
+}
+
+function deleteAcct4721(id) {
+  if(!confirm('ต้องการลบรายการนี้ใช่หรือไม่?')) return;
+  data.acct4721 = (data.acct4721||[]).filter(t=>t.id!=id);
+  save();
+  renderAcct4721Balance();
+  renderAcct4721Table();
+  showToast('ลบรายการแล้ว');
+}
+
+function onAcct4721CompanyInput() {
+  const inp  = document.getElementById('acct4721-company');
+  const drop = document.getElementById('acct4721-company-drop');
+  const val  = inp.value.toLowerCase();
+  if(!val){ drop.style.display='none'; return; }
+  // Merge from global companies + local acct4721Companies
+  const all = [...new Set([...acct4721Companies, ...(data.companies||[])])];
+  const matches = all.filter(c=>c.toLowerCase().includes(val)).slice(0,8);
+  if(!matches.length){ drop.style.display='none'; return; }
+  drop.innerHTML = matches.map(c=>
+    `<div class="drop-item" onmousedown="selectAcct4721Company('${c.replace(/'/g,"\\'")}')">
+      <i class="ti ti-building" style="font-size:12px;margin-right:6px;color:var(--text2)"></i>${esc(c)}
+    </div>`).join('');
+  drop.style.display = 'block';
+}
+
+function selectAcct4721Company(company) {
+  const inp = document.getElementById('acct4721-company');
+  if(inp) inp.value = company;
+  const drop = document.getElementById('acct4721-company-drop');
+  if(drop) drop.style.display = 'none';
 }
 </script>
 </body>
