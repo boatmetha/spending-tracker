@@ -689,6 +689,10 @@ var selectedPayment = 'transfer';
           <label><i class="ti ti-notes" style="font-size:12px;margin-right:4px"></i>หมายเหตุ (ไม่บังคับ)</label>
           <input type="text" id="acct4721-note" placeholder="รายละเอียดเพิ่มเติม...">
         </div>
+        <div class="form-group full" id="acct4721-cat-row" style="display:none">
+          <label><i class="ti ti-tag" style="font-size:12px;margin-right:4px"></i>แผนก (สำหรับจ่ายออก)</label>
+          <div class="dept-checkbox-group" id="acct4721-category-checks"></div>
+        </div>
       </div>
       <div style="margin-top:1rem">
         <button class="btn btn-success" onclick="saveAcct4721()"><i class="ti ti-check"></i> บันทึก</button>
@@ -711,7 +715,7 @@ var selectedPayment = 'transfer';
       <div style="overflow-x:auto">
         <table class="records-table" id="acct4721-table">
           <thead><tr>
-            <th>วันที่</th><th>ประเภท</th><th>บริษัท / ร้านค้า</th><th>หมายเหตุ</th>
+            <th>วันที่</th><th>ประเภท</th><th>แผนก</th><th>บริษัท / ร้านค้า</th><th>หมายเหตุ</th>
             <th style="text-align:right">เงินเข้า (+)</th>
             <th style="text-align:right">จ่ายออก (-)</th>
             <th style="text-align:right">คงเหลือ</th>
@@ -1805,6 +1809,13 @@ function buildStyledXlsx() {
     return true;
   };
   const filteredEntries = data.entries.filter(filterEntry);
+  // Filter incomes by the same date range (income is month-based YYYY-MM)
+  const filteredIncomes = (data.incomes||[]).filter(inc=>{
+    if(!inc.month) return false;
+    if(from && inc.month < from.slice(0,7)) return false;
+    if(to   && inc.month > to.slice(0,7))   return false;
+    return true;
+  });
   let dateLabel = '';
   if(from || to){
     if(from && to){
@@ -1869,6 +1880,99 @@ function buildStyledXlsx() {
 
   const sheetXmls=[];
   const sheetNames=[];
+  const sheetColors=[]; // tab color per sheet (hex ARGB or null)
+  // helper: inject tabColor into a worksheet XML string
+  const withTabColor = (xml, argb) => {
+    if(!argb) return xml;
+    const pr = `<sheetPr><tabColor rgb="${argb}"/></sheetPr>`;
+    return xml.replace(/(<worksheet[^>]*>)/, '$1'+pr);
+  };
+
+  /* ── 0. DASHBOARD — one-page executive overview ── */
+  {
+    const cats = data.categories||[];
+    const totalExp = filteredEntries.reduce((s,e)=>s+e.amount,0);
+    const totalInc = filteredIncomes.reduce((s,e)=>s+e.amount,0);
+    const totalProfit = totalInc - totalExp;
+    const totalCash = filteredEntries.filter(e=>e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
+    const totalTransfer = totalExp - totalCash;
+    const cashPocketTotal = cats.reduce((s,c)=>{
+      const t=(data.topupHistory||[]).filter(h=>h.category===c).reduce((a,h)=>a+h.amount,0);
+      const sp=(data.entries||[]).filter(e=>e.category===c&&e.paymentMethod==='cash'&&!e.deleted).reduce((a,e)=>a+e.amount,0);
+      return s+Math.max(0,t-sp);
+    },0);
+
+    let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml+=`<cols><col min="1" max="1" width="30"/><col min="2" max="2" width="20"/><col min="3" max="3" width="16"/><col min="4" max="4" width="40"/></cols>`;
+    xml+='<sheetData>';
+
+    // Title
+    xml+=`<row r="1" ht="34" customHeight="1">${T('A1','📊 ภาพรวมธุรกิจ — Business Dashboard'+dateLabel,7)}</row>`;
+    xml+=`<row r="2"/>`;
+
+    // ── KPI ROW ──
+    xml+=`<row r="3" ht="20" customHeight="1">${T('A3','ตัวชี้วัดหลัก (Key Metrics)',2)}${T('B3','',2)}${T('C3','',2)}${T('D3','',2)}</row>`;
+    xml+=`<row r="4" ht="22" customHeight="1">${T('A4','รายรับรวม (Income)',1)}${N('B4',totalInc,5)}${T('C4','',8)}${T('D4','',8)}</row>`;
+    xml+=`<row r="5" ht="22" customHeight="1">${T('A5','รายจ่ายรวม (Expense)',1)}${N('B5',totalExp,6)}${T('C5','',8)}${T('D5','',8)}</row>`;
+    const profitStyle = totalProfit>=0 ? 5 : 6;
+    xml+=`<row r="6" ht="22" customHeight="1">${T('A6','กำไร/ขาดทุนสุทธิ (Net Profit)',1)}${N('B6',totalProfit,profitStyle)}${T('C6',totalInc>0?Math.round(totalProfit/totalInc*100)+'% margin':'',8)}${T('D6','',8)}</row>`;
+    xml+=`<row r="7" ht="22" customHeight="1">${T('A7','เงินสดคงเหลือในกระเป๋า (Cash on hand)',1)}${N('B7',cashPocketTotal,3)}${T('C7','',8)}${T('D7','',8)}</row>`;
+    xml+=`<row r="8"/>`;
+
+    // ── PAYMENT SPLIT ──
+    xml+=`<row r="9" ht="20" customHeight="1">${T('A9','วิธีชำระเงิน (Payment Method)',2)}${T('B9','',2)}${T('C9','',2)}${T('D9','',2)}</row>`;
+    xml+=`<row r="10" ht="18" customHeight="1">${T('A10','จำนวนเงิน (฿)',1)}${T('B10','%',1)}${T('C10','',1)}${T('D10','สัดส่วน (กราฟ)',1)}</row>`;
+    xml+=`<row r="11">${T('A11','💵 เงินสด (Cash)',8)}${N('B11',totalExp>0?Math.round(totalCash/totalExp*100):0,8)}${T('C11','',8)}${N('D11',totalCash,4)}</row>`;
+    xml+=`<row r="12">${T('A12','🏦 โอนเงิน (Transfer)',8)}${N('B12',totalExp>0?Math.round(totalTransfer/totalExp*100):0,8)}${T('C12','',8)}${N('D12',totalTransfer,4)}</row>`;
+    xml+=`<row r="13"/>`;
+
+    // ── PER-แผนก PERFORMANCE ──
+    xml+=`<row r="14" ht="20" customHeight="1">${T('A14','ผลประกอบการแต่ละแผนก (Department Performance)',2)}${T('B14','',2)}${T('C14','',2)}${T('D14','',2)}</row>`;
+    xml+=`<row r="15" ht="18" customHeight="1">${T('A15','แผนก',1)}${T('B15','รายรับ (฿)',1)}${T('C15','รายจ่าย (฿)',1)}${T('D15','กำไร/ขาดทุน (฿)',1)}</row>`;
+    let r=16;
+    const deptBarStart=r;
+    cats.forEach(cat=>{
+      const cInc=filteredIncomes.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0);
+      const cExp=filteredEntries.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0);
+      const cNet=cInc-cExp;
+      if(cInc===0 && cExp===0) return;
+      xml+=`<row r="${r}">${T(`A${r}`,cat,8)}${N(`B${r}`,cInc,5)}${N(`C${r}`,cExp,6)}${N(`D${r}`,cNet,cNet>=0?5:6)}</row>`;
+      r++;
+    });
+    // total row
+    xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'รวมทั้งหมด',3)}${N(`B${r}`,totalInc,3)}${N(`C${r}`,totalExp,3)}${N(`D${r}`,totalProfit,3)}</row>`;
+    r+=2;
+
+    // ── TOP EXPENSE CATEGORIES ──
+    const expTypes=Object.keys(EXPENSE_HINTS);
+    const expTotals=expTypes.map(et=>({
+      et:et.replace(/\s*\(.*\)/,''),
+      amount:filteredEntries.filter(e=>e.expenseCat===et).reduce((s,e)=>s+e.amount,0)
+    })).filter(x=>x.amount>0).sort((a,b)=>b.amount-a.amount);
+    if(expTotals.length){
+      xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'ค่าใช้จ่ายสูงสุด (Top Expenses)',2)}${T(`B${r}`,'',2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}</row>`;
+      r++;
+      xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'ประเภท',1)}${T(`B${r}`,'จำนวนเงิน (฿)',1)}${T(`C${r}`,'%',1)}${T(`D${r}`,'สัดส่วน (กราฟ)',1)}</row>`;
+      r++;
+      const expBarStart=r;
+      expTotals.forEach(x=>{
+        const pct=totalExp>0?Math.round(x.amount/totalExp*1000)/10:0;
+        xml+=`<row r="${r}">${T(`A${r}`,x.et,8)}${N(`B${r}`,x.amount,4)}${T(`C${r}`,pct+'%',8)}${N(`D${r}`,x.amount,4)}</row>`;
+        r++;
+      });
+      var expBarEnd=r-1;
+      var expBarRange=`D${expBarStart}:D${expBarEnd}`;
+    }
+
+    xml+='</sheetData>';
+    // data bars
+    xml+=`<conditionalFormatting sqref="D11:D12"><cfRule type="dataBar" priority="1"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF1A5276"/></dataBar></cfRule></conditionalFormatting>`;
+    if(typeof expBarRange!=='undefined'){
+      xml+=`<conditionalFormatting sqref="${expBarRange}"><cfRule type="dataBar" priority="2"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FFA32D2D"/></dataBar></cfRule></conditionalFormatting>`;
+    }
+    xml+='</worksheet>';
+    sheetXmls.push(xml); sheetNames.push('🏠 Dashboard'); sheetColors.push('FF1D9E75');
+  }
 
   /* ── 1. SUMMARY SHEET ── */
   {
@@ -1931,8 +2035,7 @@ function buildStyledXlsx() {
     });
 
     xml+='</sheetData></worksheet>';
-    sheetXmls.push(xml);
-    sheetNames.push('📊 Summary');
+    sheetXmls.push(xml); sheetNames.push('📊 Summary'); sheetColors.push('FF1A3A5C');
   }
 
   /* ── 2. DETAIL SHEET (all transactions) ── */
@@ -1961,8 +2064,7 @@ function buildStyledXlsx() {
     const lastR=entries.length+2;
     xml+=`<row r="${lastR}">${T(`A${lastR}`,'',3)}${T(`B${lastR}`,'',3)}${T(`C${lastR}`,'',3)}${T(`D${lastR}`,'',3)}${T(`E${lastR}`,'',3)}${T(`F${lastR}`,'',3)}${T(`G${lastR}`,'ยอดรวม',3)}${N(`H${lastR}`,total,3)}${T(`I${lastR}`,'',3)}</row>`;
     xml+='</sheetData></worksheet>';
-    sheetXmls.push(xml);
-    sheetNames.push('All Transactions');
+    sheetXmls.push(xml); sheetNames.push('All Transactions'); sheetColors.push('FF444444');
   }
 
   /* ── 3. PER-แผนก SHEETS ── */
@@ -2000,8 +2102,7 @@ function buildStyledXlsx() {
     xml+=`<row r="${lr+1}">${T(`A${lr+1}`,'',3)}${T(`B${lr+1}`,'',3)}${T(`C${lr+1}`,'',3)}${T(`D${lr+1}`,'',3)}${T(`E${lr+1}`,'',3)}${T(`F${lr+1}`,'เงินสด',3)}${N(`G${lr+1}`,cash,3)}${T(`H${lr+1}`,'',3)}</row>`;
     xml+=`<row r="${lr+2}">${T(`A${lr+2}`,'',3)}${T(`B${lr+2}`,'',3)}${T(`C${lr+2}`,'',3)}${T(`D${lr+2}`,'',3)}${T(`E${lr+2}`,'',3)}${T(`F${lr+2}`,'โอนเงิน',3)}${N(`G${lr+2}`,tr,3)}${T(`H${lr+2}`,'',3)}</row>`;
     xml+='</sheetData></worksheet>';
-    sheetXmls.push(xml);
-    sheetNames.push(cat.replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Sheet');
+    sheetXmls.push(xml); sheetNames.push(cat.replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Sheet'); sheetColors.push('FFA32D2D');
   });
 
   /* ── 4. CASH DETAIL PER-แผนก SHEETS ── */
@@ -2043,8 +2144,7 @@ function buildStyledXlsx() {
     const ts2=all.reduce((s,e)=>s+e.spend,0);
     xml+=`<row r="${lr}">${T(`A${lr}`,'',3)}${T(`B${lr}`,'',3)}${T(`C${lr}`,'',3)}${T(`D${lr}`,'',3)}${T(`E${lr}`,'',3)}${T(`F${lr}`,'รวม',3)}${N(`G${lr}`,tt,3)}${N(`H${lr}`,ts2,3)}${N(`I${lr}`,Math.round(running*100)/100,3)}${T(`J${lr}`,'',3)}</row>`;
     xml+='</sheetData></worksheet>';
-    sheetXmls.push(xml);
-    sheetNames.push(('Cash_'+cat).replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Cash'+(idx+1));
+    sheetXmls.push(xml); sheetNames.push(('Cash_'+cat).replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Cash'+(idx+1)); sheetColors.push('FF1A5276');
   });
 
   /* ── 5. FINANCIAL STATEMENT — Monthly P&L ── */
@@ -2052,7 +2152,7 @@ function buildStyledXlsx() {
     // Collect all months from entries + incomes
     const allMonths = new Set();
     filteredEntries.forEach(e=>{ if(e.dt) allMonths.add(e.dt.slice(0,7)); });
-    (data.incomes||[]).forEach(e=>{ if(e.month) allMonths.add(e.month); });
+    filteredIncomes.forEach(e=>{ if(e.month) allMonths.add(e.month); });
     const months = Array.from(allMonths).sort().reverse();
 
     if(months.length) {
@@ -2063,7 +2163,7 @@ function buildStyledXlsx() {
 
       let yearMap = {};
       months.forEach(month=>{
-        const mInc  = (data.incomes||[]).filter(e=>e.month===month).reduce((s,e)=>s+e.amount,0);
+        const mInc  = filteredIncomes.filter(e=>e.month===month).reduce((s,e)=>s+e.amount,0);
         const mExp  = filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month).reduce((s,e)=>s+e.amount,0);
         const mNet  = mInc - mExp;
         const [y,m] = month.split('-');
@@ -2072,7 +2172,7 @@ function buildStyledXlsx() {
 
         const row = [THAI_MONTH_NAMES[parseInt(m)-1]+' '+y, mInc, mExp, mNet];
         cats.forEach(c=>{
-          const cInc = (data.incomes||[]).filter(e=>e.month===month&&e.category===c).reduce((s,e)=>s+e.amount,0);
+          const cInc = filteredIncomes.filter(e=>e.month===month&&e.category===c).reduce((s,e)=>s+e.amount,0);
           const cExp = filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month&&e.category===c).reduce((s,e)=>s+e.amount,0);
           row.push(cInc, cExp, cInc-cExp);
         });
@@ -2110,7 +2210,7 @@ function buildStyledXlsx() {
         }).join('')}</row>`;
       });
       xml+='</sheetData></worksheet>';
-      sheetXmls.push(xml); sheetNames.push('📈 P&L Statement');
+      sheetXmls.push(xml); sheetNames.push('📈 P&L Statement'); sheetColors.push('FF1A3A5C');
     }
   }
 
@@ -2118,7 +2218,7 @@ function buildStyledXlsx() {
   (data.categories||[]).forEach(cat=>{
     const allMonths = new Set();
     filteredEntries.filter(e=>e.category===cat).forEach(e=>{ if(e.dt) allMonths.add(e.dt.slice(0,7)); });
-    (data.incomes||[]).filter(e=>e.category===cat).forEach(e=>{ if(e.month) allMonths.add(e.month); });
+    filteredIncomes.filter(e=>e.category===cat).forEach(e=>{ if(e.month) allMonths.add(e.month); });
     const months = Array.from(allMonths).sort().reverse();
     if(!months.length) return;
 
@@ -2133,7 +2233,7 @@ function buildStyledXlsx() {
     const catRows=[];
     months.forEach(month=>{
       const [y,m]=month.split('-');
-      const mInc=(data.incomes||[]).filter(e=>e.month===month&&e.category===cat).reduce((s,e)=>s+e.amount,0);
+      const mInc=filteredIncomes.filter(e=>e.month===month&&e.category===cat).reduce((s,e)=>s+e.amount,0);
       const mExp=filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===month&&e.category===cat).reduce((s,e)=>s+e.amount,0);
       const mNet=mInc-mExp;
       // cash pocket at end of month: topped - all cash spending up to this month
@@ -2150,8 +2250,7 @@ function buildStyledXlsx() {
     const lr=catRows.length+4;
     xml+=`<row r="${lr}">${T(`A${lr}`,'รวม',3)}${N(`B${lr}`,totalInc,3)}${N(`C${lr}`,totalExp,3)}${N(`D${lr}`,totalInc-totalExp,3)}${T(`E${lr}`,'',3)}</row>`;
     xml+='</sheetData></worksheet>';
-    sheetXmls.push(xml);
-    sheetNames.push((cat+'_PL').replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31));
+    sheetXmls.push(xml); sheetNames.push((cat+'_PL').replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)); sheetColors.push('FF6B3FA0');
   });
 
   /* ── 7. EXPENSE BREAKDOWN % SHEET ── */
@@ -2193,15 +2292,13 @@ function buildStyledXlsx() {
         }).join('')}</row>`;
       });
       xml+='</sheetData></worksheet>';
-      sheetXmls.push(xml); sheetNames.push('Expense Breakdown');
+      sheetXmls.push(xml); sheetNames.push('Expense Breakdown'); sheetColors.push('FFA32D2D');
     }
   }
 
   /* ── 8. INCOME DETAIL SHEET ── */
-  if((data.incomes||[]).length){
-    const incomeFiltered = from||to
-      ? (data.incomes||[]).filter(e=>(!from||e.month+'−01'>=from)&&(!to||e.month+'-31'<=to))
-      : (data.incomes||[]);
+  if(filteredIncomes.length){
+    const incomeFiltered = filteredIncomes;
     if(incomeFiltered.length){
       const hdr=['เดือน','แผนก','แหล่งรายรับ','หมายเหตุ','จำนวนเงิน (฿)','บันทึกโดย'];
       const rows=[hdr,...incomeFiltered.slice().sort((a,b)=>b.month.localeCompare(a.month)).map(e=>{
@@ -2224,7 +2321,68 @@ function buildStyledXlsx() {
         ).join('')}</row>`;
       });
       xml+='</sheetData></worksheet>';
-      sheetXmls.push(xml); sheetNames.push('Income');
+      sheetXmls.push(xml); sheetNames.push('Income'); sheetColors.push('FF1D9E75');
+    }
+  }
+
+  /* ── 9. CATEGORY ANALYSIS — spending by expense category per แผนก (with data bars) ── */
+  {
+    const cats = data.categories||[];
+    const expTypes = Object.keys(EXPENSE_HINTS);
+    // short labels for readability
+    const shortLabel = et => et.replace(/\s*\(.*\)/,''); // strip English part
+
+    let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml+=`<cols><col min="1" max="1" width="34"/><col min="2" max="2" width="18"/><col min="3" max="3" width="10"/><col min="4" max="4" width="40"/></cols>`;
+    xml+='<sheetData>';
+    xml+=`<row r="1" ht="28" customHeight="1">${T('A1','📊 Category Analysis — รายจ่ายแต่ละแผนก'+dateLabel,7)}</row><row r="2"/>`;
+
+    let r = 3;
+    const dataBarRanges = []; // collect ranges for conditional formatting
+
+    cats.forEach(cat=>{
+      const catEntries = filteredEntries.filter(e=>e.category===cat);
+      const catTotal = catEntries.reduce((s,e)=>s+e.amount,0);
+      if(catTotal <= 0) return; // skip empty แผนก
+
+      // Section header (แผนก name)
+      xml+=`<row r="${r}" ht="22" customHeight="1">${T(`A${r}`,'▎ '+cat,2)}${T(`B${r}`,'ยอดรวม '+fmtBaht(catTotal),2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}</row>`;
+      r++;
+      // Column headers
+      xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'ประเภทค่าใช้จ่าย',1)}${T(`B${r}`,'จำนวนเงิน (฿)',1)}${T(`C${r}`,'%',1)}${T(`D${r}`,'สัดส่วน (กราฟ)',1)}</row>`;
+      r++;
+
+      const barStart = r;
+      // Sort expense types by amount desc
+      const rows = expTypes.map(et=>({
+        et, amount: catEntries.filter(e=>e.expenseCat===et).reduce((s,e)=>s+e.amount,0)
+      })).filter(x=>x.amount>0).sort((a,b)=>b.amount-a.amount);
+
+      // uncategorized
+      const uncat = catEntries.filter(e=>!expTypes.includes(e.expenseCat)).reduce((s,e)=>s+e.amount,0);
+      if(uncat>0) rows.push({et:'(ไม่ระบุประเภท)', amount:uncat});
+
+      rows.forEach(x=>{
+        const pct = catTotal>0 ? Math.round(x.amount/catTotal*1000)/10 : 0;
+        xml+=`<row r="${r}">${T(`A${r}`,shortLabel(x.et),8)}${N(`B${r}`,x.amount,4)}${T(`C${r}`,pct+'%',8)}${N(`D${r}`,x.amount,4)}</row>`;
+        r++;
+      });
+      const barEnd = r-1;
+      if(barEnd >= barStart) dataBarRanges.push(`D${barStart}:D${barEnd}`);
+
+      r++; // blank row between แผนก
+    });
+
+    xml+='</sheetData>';
+
+    // Add data bar conditional formatting for each แผนก's proportion column
+    dataBarRanges.forEach((range,i)=>{
+      xml+=`<conditionalFormatting sqref="${range}"><cfRule type="dataBar" priority="${i+1}"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF2E75B6"/></dataBar></cfRule></conditionalFormatting>`;
+    });
+
+    xml+='</worksheet>';
+    if(dataBarRanges.length){
+      sheetXmls.push(xml); sheetNames.push('📊 Category Analysis'); sheetColors.push('FF6B3FA0');
     }
   }
 
@@ -2242,7 +2400,7 @@ function buildStyledXlsx() {
     ['xl/_rels/workbook.xml.rels',wbRels],
     ['xl/sharedStrings.xml',ssXml],
     ['xl/styles.xml',stylesXml],
-    ...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',xml])
+    ...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',withTabColor(xml,sheetColors[i])])
   ];
   return zipFiles(files);
 }
@@ -3419,13 +3577,17 @@ function renderIncomeTable() {
     return;
   }
 
-  // Sort by month desc then by createdAt desc
   rows = rows.slice().sort((a,b)=> b.month===a.month ? new Date(b.createdAt)-new Date(a.createdAt) : b.month.localeCompare(a.month));
 
   tbody.innerHTML = rows.map(e=>`
-    <tr>
+    <tr id="income-row-${e.id}">
       <td>${esc(e.month ? THAI_MONTH_NAMES[parseInt(e.month.split('-')[1])-1]+' '+e.month.split('-')[0] : '—')}</td>
-      <td><span class="badge" style="background:${catColor(e.category)}22;color:${catColor(e.category)}">${esc(e.category)}</span></td>
+      <td id="income-cat-cell-${e.id}">
+        <span class="badge" style="background:${catColor(e.category)}22;color:${catColor(e.category)}">${esc(e.category)}</span>
+        <button class="btn btn-sm" style="padding:2px 6px;font-size:10px;margin-left:4px" onclick="editIncomeCategory(${e.id})" title="เปลี่ยนแผนก">
+          <i class="ti ti-pencil"></i>
+        </button>
+      </td>
       <td style="font-weight:500">${esc(e.source||'—')}</td>
       <td style="font-size:12px;color:var(--text2)">${esc(e.note||'—')}</td>
       <td style="text-align:right;font-weight:600;color:var(--green-dark)">${fmtBaht(e.amount)}</td>
@@ -3435,6 +3597,45 @@ function renderIncomeTable() {
 
   const total = rows.reduce((s,e)=>s+e.amount,0);
   if(totalEl) totalEl.innerHTML = `รวม ${rows.length} รายการ: <span style="color:var(--green-dark)">${fmtBaht(total)}</span>`;
+}
+
+function editIncomeCategory(id) {
+  const entry = (data.incomes||[]).find(e=>e.id==id);
+  if(!entry) return;
+  const cell = document.getElementById('income-cat-cell-'+id);
+  if(!cell) return;
+
+  // Build inline dropdown
+  const catOpts = data.categories.map(c=>
+    `<option value="${esc(c)}"${c===entry.category?' selected':''}>${esc(c)}</option>`
+  ).join('');
+
+  cell.innerHTML = `
+    <select id="income-cat-select-${id}" style="padding:4px 6px;font-size:12px;font-family:inherit;border:1px solid var(--green);border-radius:4px">
+      ${catOpts}
+    </select>
+    <button class="btn btn-success btn-sm" style="padding:3px 8px;font-size:11px;margin-left:4px" onclick="saveIncomeCategory(${id})">
+      <i class="ti ti-check"></i> บันทึก
+    </button>
+    <button class="btn btn-sm" style="padding:3px 8px;font-size:11px" onclick="renderIncomeTable()">
+      <i class="ti ti-x"></i>
+    </button>`;
+  // focus dropdown
+  const sel = document.getElementById('income-cat-select-'+id);
+  if(sel) sel.focus();
+}
+
+function saveIncomeCategory(id) {
+  const entry = (data.incomes||[]).find(e=>e.id==id);
+  if(!entry) return;
+  const sel = document.getElementById('income-cat-select-'+id);
+  if(!sel) return;
+  const newCat = sel.value;
+  if(newCat === entry.category) { renderIncomeTable(); return; }
+  entry.category = newCat;
+  save();
+  renderIncomeTable();
+  showToast('เปลี่ยนแผนกแล้ว → '+newCat+' ✓');
 }
 /* ═══════════════════════════════════════════
    EXCEL IMPORT
@@ -3842,9 +4043,9 @@ function exportAcct4721(period) {
 
   /* ── Sheet 1: All Transactions ── */
   {
-    const hdr=['วันที่','ประเภท','บริษัท / ร้านค้า','หมายเหตุ','เงินเข้า (+) ฿','จ่ายออก (-) ฿','คงเหลือ ฿','บันทึกโดย'];
+    const hdr=['วันที่','ประเภท','แผนก','บริษัท / ร้านค้า','หมายเหตุ','เงินเข้า (+) ฿','จ่ายออก (-) ฿','คงเหลือ ฿','บันทึกโดย'];
     let xml=`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`;
-    xml+=`<cols><col min="1" max="1" width="14"/><col min="2" max="2" width="12"/><col min="3" max="3" width="28"/><col min="4" max="4" width="24"/><col min="5" max="7" width="16"/><col min="8" max="8" width="16"/></cols>`;
+    xml+=`<cols><col min="1" max="1" width="14"/><col min="2" max="2" width="12"/><col min="3" max="3" width="14"/><col min="4" max="4" width="26"/><col min="5" max="5" width="22"/><col min="6" max="8" width="16"/><col min="9" max="9" width="16"/></cols>`;
     xml+='<sheetData>';
     xml+=`<row r="1" ht="28" customHeight="1">${T('A1','💳 Account 4721 — '+periodLabel,7)}</row><row r="2"/>`;
     xml+=`<row r="3" ht="20" customHeight="1">${hdr.map((h,i)=>T(`${col(i)}3`,h,1)).join('')}</row>`;
@@ -3856,18 +4057,19 @@ function exportAcct4721(period) {
       xml+=`<row r="${r}">
         ${T(`A${r}`,t.dt,8)}
         ${T(`B${r}`,t.type==='in'?'เงินเข้า':'จ่ายออก',8)}
-        ${T(`C${r}`,t.company||'',8)}
-        ${T(`D${r}`,t.note||'',8)}
-        ${t.type==='in' ?N(`E${r}`,t.amount,5):T(`E${r}`,'',8)}
-        ${t.type==='out'?N(`F${r}`,t.amount,6):T(`F${r}`,'',8)}
-        ${N(`G${r}`,runRound,runRound>=0?4:6)}
-        ${T(`H${r}`,t.createdBy||'',8)}
+        ${T(`C${r}`,t.category||'',8)}
+        ${T(`D${r}`,t.company||'',8)}
+        ${T(`E${r}`,t.note||'',8)}
+        ${t.type==='in' ?N(`F${r}`,t.amount,5):T(`F${r}`,'',8)}
+        ${t.type==='out'?N(`G${r}`,t.amount,6):T(`G${r}`,'',8)}
+        ${N(`H${r}`,runRound,runRound>=0?4:6)}
+        ${T(`I${r}`,t.createdBy||'',8)}
       </row>`;
     });
     const totalIn =txns.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
     const totalOut=txns.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
     const lr=txns.length+4;
-    xml+=`<row r="${lr}">${T(`A${lr}`,'',3)}${T(`B${lr}`,'',3)}${T(`C${lr}`,'',3)}${T(`D${lr}`,'รวม',3)}${N(`E${lr}`,totalIn,3)}${N(`F${lr}`,totalOut,3)}${N(`G${lr}`,Math.round(running*100)/100,3)}${T(`H${lr}`,'',3)}</row>`;
+    xml+=`<row r="${lr}">${T(`A${lr}`,'',3)}${T(`B${lr}`,'',3)}${T(`C${lr}`,'',3)}${T(`D${lr}`,'',3)}${T(`E${lr}`,'รวม',3)}${N(`F${lr}`,totalIn,3)}${N(`G${lr}`,totalOut,3)}${N(`H${lr}`,Math.round(running*100)/100,3)}${T(`I${lr}`,'',3)}</row>`;
     xml+='</sheetData></worksheet>';
     sheetXmls.push(xml); sheetNames.push('รายการ');
   }
@@ -3945,7 +4147,7 @@ function exportAcct4721(period) {
   const rootRels='<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
   const ct='<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheetNames.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>';
 
-  const files=[['[Content_Types].xml',ct],['_rels/.rels',rootRels],['xl/workbook.xml',wbXml],['xl/_rels/workbook.xml.rels',wbRels],['xl/sharedStrings.xml',ssXml],['xl/styles.xml',stylesXml],...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',xml])];
+  const files=[['[Content_Types].xml',ct],['_rels/.rels',rootRels],['xl/workbook.xml',wbXml],['xl/_rels/workbook.xml.rels',wbRels],['xl/sharedStrings.xml',ssXml],['xl/styles.xml',stylesXml],...sheetXmls.map((xml,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',withTabColor(xml,sheetColors[i])])];
   const wb = zipFiles(files);
   const blob=new Blob([wb],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url=URL.createObjectURL(blob);
@@ -3961,10 +4163,11 @@ var acct4721Companies = []; // autocomplete list
 
 function renderAcct4721() {
   if(!data.acct4721) data.acct4721 = [];
-  // Set default date
   const dateEl = document.getElementById('acct4721-date');
   if(dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
-  // Default type
+  // reset แผนก pills so they repopulate if categories changed
+  const checksEl = document.getElementById('acct4721-category-checks');
+  if(checksEl) checksEl.innerHTML = '';
   setAcct4721Type('in');
   renderAcct4721Balance();
   renderAcct4721Table();
@@ -3976,6 +4179,24 @@ function setAcct4721Type(type) {
   const btnOut = document.getElementById('acct-btn-out');
   if(btnIn)  btnIn.className  = 'acct-type-btn' + (type==='in'  ? ' in'  : '');
   if(btnOut) btnOut.className = 'acct-type-btn' + (type==='out' ? ' out' : '');
+
+  const catRow   = document.getElementById('acct4721-cat-row');
+  const checksEl = document.getElementById('acct4721-category-checks');
+
+  if(type === 'out') {
+    if(catRow) catRow.style.display = '';
+    if(checksEl) {
+      const prevSel = (document.querySelector('input[name="acct4721-cat-radio"]:checked')||{}).value || '';
+      let html = '<input type="radio" class="dept-checkbox-item" name="acct4721-cat-radio" id="a4cat_none" value=""'+(prevSel===''?' checked':'')+'><label class="dept-checkbox-label" for="a4cat_none">ไม่ระบุ</label>';
+      data.categories.forEach((c,i)=>{
+        const id = 'a4cat_'+i;
+        html += '<input type="radio" class="dept-checkbox-item" name="acct4721-cat-radio" id="'+id+'" value="'+esc(c)+'"'+(c===prevSel?' checked':'')+'><label class="dept-checkbox-label" for="'+id+'">'+esc(c)+'</label>';
+      });
+      checksEl.innerHTML = html;
+    }
+  } else {
+    if(catRow) catRow.style.display = 'none';
+  }
 }
 
 function renderAcct4721Balance() {
@@ -4025,6 +4246,7 @@ function renderAcct4721Table() {
       <td><span style="font-weight:600;color:${t.type==='in'?'#1a5276':'var(--red)'}">
         ${t.type==='in' ? '＋ เงินเข้า' : '－ จ่ายออก'}
       </span></td>
+      <td>${t.category?`<span class="badge" style="background:${catColor(t.category)}22;color:${catColor(t.category)}">${esc(t.category)}</span>`:'<span style="color:var(--text2);font-size:11px">—</span>'}</td>
       <td style="font-weight:500">${esc(t.company||'—')}</td>
       <td style="font-size:12px;color:var(--text2)">${esc(t.note||'—')}</td>
       <td style="text-align:right;color:#1a5276;font-weight:500">${t.type==='in'  ? fmtBaht(t.amount) : '—'}</td>
@@ -4039,33 +4261,32 @@ function saveAcct4721() {
   const amount  = parseFloat(document.getElementById('acct4721-amount').value);
   const company = document.getElementById('acct4721-company').value.trim();
   const note    = document.getElementById('acct4721-note').value.trim();
+  const catEl   = document.querySelector('input[name="acct4721-cat-radio"]:checked');
+  const category = (acct4721Type==='out' && catEl) ? catEl.value : '';
 
-  if(!dt)             { alert('กรุณาเลือกวันที่'); return; }
+  if(!dt)                      { alert('กรุณาเลือกวันที่'); return; }
   if(isNaN(amount)||amount<=0) { alert('กรุณากรอกจำนวนเงิน'); return; }
-  if(!company)        { alert('กรุณากรอกชื่อบริษัท/ร้านค้า'); return; }
+  if(!company)                 { alert('กรุณากรอกชื่อบริษัท/ร้านค้า'); return; }
 
   if(!data.acct4721) data.acct4721 = [];
-
   const entry = {
     id: Date.now()+Math.random(),
-    dt, amount, company, note,
+    dt, amount, company, note, category,
     type: acct4721Type,
     createdBy: driveState.currentUser ? driveState.currentUser.name : 'Unknown',
     createdAt: new Date().toISOString()
   };
   data.acct4721.push(entry);
-
-  // Update autocomplete
   if(company && !acct4721Companies.includes(company)) acct4721Companies.push(company);
-
   save();
-  // Clear form
   document.getElementById('acct4721-amount').value = '';
   document.getElementById('acct4721-company').value = '';
   document.getElementById('acct4721-note').value = '';
+  const noneRadio = document.getElementById('a4cat_none');
+  if(noneRadio) noneRadio.checked = true;
   renderAcct4721Balance();
   renderAcct4721Table();
-  showToast(`บันทึกแล้ว ${acct4721Type==='in'?'เงินเข้า':'จ่ายออก'} ฿${fmtBahtShort(amount)} ✓`);
+  showToast(`บันทึกแล้ว ${acct4721Type==='in'?'เงินเข้า':'จ่ายออก'+(category?' ('+category+')':'')} ฿${fmtBahtShort(amount)} ✓`);
 }
 
 function deleteAcct4721(id) {
