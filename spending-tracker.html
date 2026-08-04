@@ -1876,8 +1876,9 @@ function buildStyledXlsx() {
   const {from, to} = getExportDateRange();
   const filterEntry = e => {
     if(e.deleted) return false;
-    if(from && e.dt < from) return false;
-    if(to && e.dt > to) return false;
+    const d = (e.dt||'').slice(0,10);
+    if(from && d < from) return false;
+    if(to && d > to) return false;
     return true;
   };
   const filteredEntries = data.entries.filter(filterEntry);
