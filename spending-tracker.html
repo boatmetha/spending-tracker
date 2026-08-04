@@ -1613,7 +1613,7 @@ function confirmEntry(){
 let showDeleted = false;
 function deleteEntry(id){
   if(!confirm('ต้องการลบรายการนี้ใช่หรือไม่?\n\nรายการจะถูกซ่อนแต่ยังเก็บไว้ใน database')) return;
-  const e=data.entries.find(x=>x.id==id); if(!e) return;
+  const e=data.entries.find(x=>String(x.id)===String(id)); if(!e) return;
   e.deleted=true;
   e.deletedBy=driveState.currentUser?driveState.currentUser.name:'Unknown';
   e.deletedAt=new Date().toISOString();
@@ -1663,8 +1663,8 @@ function renderRecords(){
       <td>${e.deleted
         ? `<span class="deleted-badge"><i class="ti ti-trash" style="font-size:10px"></i> ลบแล้ว</span>`
         : `<div style="display:flex;gap:4px">
-            <button class="edit-row" onclick="openEditEntry(${e.id})" title="แก้ไข"><i class="ti ti-pencil"></i></button>
-            <button class="del-row" onclick="deleteEntry(${e.id})" title="ลบ"><i class="ti ti-trash"></i></button>
+            <button class="edit-row" onclick="openEditEntry('${e.id}')" title="แก้ไข"><i class="ti ti-pencil"></i></button>
+            <button class="del-row" onclick="deleteEntry('${e.id}')" title="ลบ"><i class="ti ti-trash"></i></button>
           </div>`
       }</td>
     </tr>`;
@@ -4398,7 +4398,7 @@ function selectAcct4721Company(company) {
    EDIT TRANSACTION (in รายการทั้งหมด)
    ═══════════════════════════════════════════ */
 function openEditEntry(id) {
-  const e = data.entries.find(x=>x.id==id);
+  const e = data.entries.find(x=>String(x.id)===String(id));
   if(!e) return;
 
   document.getElementById('edit-entry-id').value = id;
@@ -4458,7 +4458,7 @@ function closeEditEntry() {
 
 function saveEditEntry() {
   const id = document.getElementById('edit-entry-id').value;
-  const e = data.entries.find(x=>x.id==id);
+  const e = data.entries.find(x=>String(x.id)===String(id));
   if(!e) { closeEditEntry(); return; }
 
   const newDate    = document.getElementById('edit-date').value;
