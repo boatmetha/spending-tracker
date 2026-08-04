@@ -1960,7 +1960,7 @@ function buildStyledXlsx() {
     return xml.replace(/(<worksheet[^>]*>)/, '$1'+pr);
   };
 
-  /* ── 0. DASHBOARD — one-page executive overview ── */
+  /* ── 0. DASHBOARD — executive analysis, readable at first glance ── */
   {
     const cats = data.categories||[];
     const totalExp = filteredEntries.reduce((s,e)=>s+e.amount,0);
@@ -1974,74 +1974,132 @@ function buildStyledXlsx() {
       return s+Math.max(0,t-sp);
     },0);
 
+    // ── Month-over-month: latest month in data vs the month before ──
+    const monthsInData = [...new Set([
+      ...filteredEntries.filter(e=>e.dt).map(e=>e.dt.slice(0,7)),
+      ...filteredIncomes.map(i=>i.month)
+    ])].sort();
+    const curMo  = monthsInData[monthsInData.length-1] || '';
+    const prevMo = monthsInData[monthsInData.length-2] || '';
+    const moLabel = m => m ? THAI_MONTH_NAMES[parseInt(m.split('-')[1])-1]+' '+m.split('-')[0] : '—';
+    const moExp = m => filteredEntries.filter(e=>e.dt&&e.dt.slice(0,7)===m).reduce((s,e)=>s+e.amount,0);
+    const moInc = m => filteredIncomes.filter(i=>i.month===m).reduce((s,i)=>s+i.amount,0);
+    const chg = (cur,prev) => prev>0 ? Math.round((cur-prev)/prev*1000)/10 : (cur>0?100:0);
+    const arrow = (pct, goodWhenUp) => {
+      if(pct===0) return '— 0%';
+      const up = pct>0;
+      const sym = up ? '▲' : '▼';
+      return sym+' '+Math.abs(pct)+'%';
+    };
+
     let xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
-    xml+=`<cols><col min="1" max="1" width="30"/><col min="2" max="2" width="20"/><col min="3" max="3" width="16"/><col min="4" max="4" width="40"/></cols>`;
+    xml+=`<cols><col min="1" max="1" width="30"/><col min="2" max="2" width="18"/><col min="3" max="3" width="18"/><col min="4" max="4" width="18"/><col min="5" max="5" width="26"/></cols>`;
     xml+='<sheetData>';
 
-    // Title
+    // ══ TITLE ══
     xml+=`<row r="1" ht="34" customHeight="1">${T('A1','📊 ภาพรวมธุรกิจ — Business Dashboard'+dateLabel,7)}</row>`;
-    xml+=`<row r="2"/>`;
+    xml+=`<row r="2" ht="14" customHeight="1">${T('A2','อ่านจากบน→ล่าง: ภาพรวม → เทียบรายเดือน → รายแผนก → ร้านค้า → ประเภทค่าใช้จ่าย',8)}</row>`;
+    xml+=`<row r="3"/>`;
 
-    // ── KPI ROW ──
-    xml+=`<row r="3" ht="20" customHeight="1">${T('A3','ตัวชี้วัดหลัก (Key Metrics)',2)}${T('B3','',2)}${T('C3','',2)}${T('D3','',2)}</row>`;
-    xml+=`<row r="4" ht="22" customHeight="1">${T('A4','รายรับรวม (Income)',1)}${N('B4',totalInc,5)}${T('C4','',8)}${T('D4','',8)}</row>`;
-    xml+=`<row r="5" ht="22" customHeight="1">${T('A5','รายจ่ายรวม (Expense)',1)}${N('B5',totalExp,6)}${T('C5','',8)}${T('D5','',8)}</row>`;
-    const profitStyle = totalProfit>=0 ? 5 : 6;
-    xml+=`<row r="6" ht="22" customHeight="1">${T('A6','กำไร/ขาดทุนสุทธิ (Net Profit)',1)}${N('B6',totalProfit,profitStyle)}${T('C6',totalInc>0?Math.round(totalProfit/totalInc*100)+'% margin':'',8)}${T('D6','',8)}</row>`;
-    xml+=`<row r="7" ht="22" customHeight="1">${T('A7','เงินสดคงเหลือในกระเป๋า (Cash on hand)',1)}${N('B7',cashPocketTotal,3)}${T('C7','',8)}${T('D7','',8)}</row>`;
-    xml+=`<row r="8"/>`;
+    // ══ 1. KPI ══
+    xml+=`<row r="4" ht="20" customHeight="1">${T('A4','1) ตัวเลขสำคัญ (Key Numbers)',2)}${T('B4','',2)}${T('C4','',2)}${T('D4','',2)}${T('E4','',2)}</row>`;
+    xml+=`<row r="5" ht="22" customHeight="1">${T('A5','รายรับรวม',1)}${N('B5',totalInc,5)}${T('C5','',8)}${T('D5','',8)}${T('E5','เงินที่ธุรกิจได้รับทั้งหมด',8)}</row>`;
+    xml+=`<row r="6" ht="22" customHeight="1">${T('A6','รายจ่ายรวม',1)}${N('B6',totalExp,6)}${T('C6','',8)}${T('D6','',8)}${T('E6','เงินที่จ่ายออกทั้งหมด',8)}</row>`;
+    xml+=`<row r="7" ht="22" customHeight="1">${T('A7','กำไร / ขาดทุน',1)}${N('B7',totalProfit,totalProfit>=0?5:6)}${T('C7',totalInc>0?('margin '+Math.round(totalProfit/totalInc*100)+'%'):'',8)}${T('D7','',8)}${T('E7',totalProfit>=0?'ธุรกิจมีกำไร ✓':'⚠ รายจ่ายมากกว่ารายรับ',8)}</row>`;
+    xml+=`<row r="8" ht="22" customHeight="1">${T('A8','เงินสดคงเหลือในกระเป๋า',1)}${N('B8',cashPocketTotal,3)}${T('C8','',8)}${T('D8','',8)}${T('E8','ยอดเงินสดทุกแผนกรวมกัน',8)}</row>`;
+    xml+=`<row r="9"/>`;
 
-    // ── PAYMENT SPLIT ──
-    xml+=`<row r="9" ht="20" customHeight="1">${T('A9','วิธีชำระเงิน (Payment Method)',2)}${T('B9','',2)}${T('C9','',2)}${T('D9','',2)}</row>`;
-    xml+=`<row r="10" ht="18" customHeight="1">${T('A10','จำนวนเงิน (฿)',1)}${T('B10','%',1)}${T('C10','',1)}${T('D10','สัดส่วน (กราฟ)',1)}</row>`;
-    xml+=`<row r="11">${T('A11','💵 เงินสด (Cash)',8)}${N('B11',totalExp>0?Math.round(totalCash/totalExp*100):0,8)}${T('C11','',8)}${N('D11',totalCash,4)}</row>`;
-    xml+=`<row r="12">${T('A12','🏦 โอนเงิน (Transfer)',8)}${N('B12',totalExp>0?Math.round(totalTransfer/totalExp*100):0,8)}${T('C12','',8)}${N('D12',totalTransfer,4)}</row>`;
-    xml+=`<row r="13"/>`;
+    // ══ 2. MONTH-OVER-MONTH ══
+    let r = 10;
+    if(prevMo){
+      const cInc=moInc(curMo), pInc=moInc(prevMo);
+      const cExp=moExp(curMo), pExp=moExp(prevMo);
+      const cNet=cInc-cExp, pNet=pInc-pExp;
+      xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'2) เทียบเดือนล่าสุดกับเดือนก่อน (Month-over-Month)',2)}${T(`B${r}`,'',2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}${T(`E${r}`,'',2)}</row>`; r++;
+      xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'',1)}${T(`B${r}`,moLabel(prevMo),1)}${T(`C${r}`,moLabel(curMo),1)}${T(`D${r}`,'เปลี่ยนแปลง',1)}${T(`E${r}`,'อ่านผล',1)}</row>`; r++;
+      const incChg=chg(cInc,pInc);
+      xml+=`<row r="${r}">${T(`A${r}`,'รายรับ',8)}${N(`B${r}`,pInc,4)}${N(`C${r}`,cInc,4)}${T(`D${r}`,arrow(incChg),incChg>=0?5:6)}${T(`E${r}`,incChg>=0?'รายรับโตขึ้น ✓':'รายรับลดลง',8)}</row>`; r++;
+      const expChg=chg(cExp,pExp);
+      xml+=`<row r="${r}">${T(`A${r}`,'รายจ่าย',8)}${N(`B${r}`,pExp,4)}${N(`C${r}`,cExp,4)}${T(`D${r}`,arrow(expChg),expChg<=0?5:6)}${T(`E${r}`,expChg<=0?'คุมค่าใช้จ่ายได้ ✓':'ค่าใช้จ่ายเพิ่มขึ้น ⚠',8)}</row>`; r++;
+      const netChg=chg(cNet,pNet);
+      xml+=`<row r="${r}">${T(`A${r}`,'กำไรสุทธิ',8)}${N(`B${r}`,pNet,pNet>=0?4:6)}${N(`C${r}`,cNet,cNet>=0?5:6)}${T(`D${r}`,arrow(netChg),cNet>=pNet?5:6)}${T(`E${r}`,cNet>=pNet?'กำไรดีขึ้น ✓':'กำไรลดลง ⚠',8)}</row>`; r++;
+      xml+=`<row r="${r}"/>`; r++;
+    }
 
-    // ── PER-แผนก PERFORMANCE ──
-    xml+=`<row r="14" ht="20" customHeight="1">${T('A14','ผลประกอบการแต่ละแผนก (Department Performance)',2)}${T('B14','',2)}${T('C14','',2)}${T('D14','',2)}</row>`;
-    xml+=`<row r="15" ht="18" customHeight="1">${T('A15','แผนก',1)}${T('B15','รายรับ (฿)',1)}${T('C15','รายจ่าย (฿)',1)}${T('D15','กำไร/ขาดทุน (฿)',1)}</row>`;
-    let r=16;
+    // ══ 3. DEPARTMENT PERFORMANCE (with data bar on expense) ══
+    xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'3) ผลประกอบการแต่ละแผนก',2)}${T(`B${r}`,'',2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}${T(`E${r}`,'',2)}</row>`; r++;
+    xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'แผนก',1)}${T(`B${r}`,'รายรับ (฿)',1)}${T(`C${r}`,'รายจ่าย (฿)',1)}${T(`D${r}`,'กำไร/ขาดทุน (฿)',1)}${T(`E${r}`,'รายจ่าย (กราฟเทียบ)',1)}</row>`; r++;
     const deptBarStart=r;
-    cats.forEach(cat=>{
-      const cInc=filteredIncomes.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0);
-      const cExp=filteredEntries.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0);
-      const cNet=cInc-cExp;
-      if(cInc===0 && cExp===0) return;
-      xml+=`<row r="${r}">${T(`A${r}`,cat,8)}${N(`B${r}`,cInc,5)}${N(`C${r}`,cExp,6)}${N(`D${r}`,cNet,cNet>=0?5:6)}</row>`;
-      r++;
+    // sort by expense desc so biggest spender first
+    const deptRows = cats.map(cat=>({
+      cat,
+      inc: filteredIncomes.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0),
+      exp: filteredEntries.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0)
+    })).filter(d=>d.inc>0||d.exp>0).sort((a,b)=>b.exp-a.exp);
+    deptRows.forEach(d=>{
+      const net=d.inc-d.exp;
+      xml+=`<row r="${r}">${T(`A${r}`,d.cat,8)}${N(`B${r}`,d.inc,4)}${N(`C${r}`,d.exp,4)}${N(`D${r}`,net,net>=0?5:6)}${N(`E${r}`,d.exp,4)}</row>`; r++;
     });
-    // total row
-    xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'รวมทั้งหมด',3)}${N(`B${r}`,totalInc,3)}${N(`C${r}`,totalExp,3)}${N(`D${r}`,totalProfit,3)}</row>`;
-    r+=2;
+    const deptBarEnd=r-1;
+    xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'รวมทั้งหมด',3)}${N(`B${r}`,totalInc,3)}${N(`C${r}`,totalExp,3)}${N(`D${r}`,totalProfit,3)}${T(`E${r}`,'',3)}</row>`; r+=2;
 
-    // ── TOP EXPENSE CATEGORIES ──
+    // ══ 4. TOP 5 VENDORS ══
+    const vendorMap={};
+    filteredEntries.forEach(e=>{
+      const v=(e.company||e.transfer||'(ไม่ระบุ)').trim()||'(ไม่ระบุ)';
+      vendorMap[v]=(vendorMap[v]||0)+e.amount;
+    });
+    const topVendors=Object.entries(vendorMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    let vendBarStart=0, vendBarEnd=0;
+    if(topVendors.length){
+      xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'4) จ่ายให้ใครมากที่สุด (Top 5 ร้านค้า/ผู้รับเงิน)',2)}${T(`B${r}`,'',2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}${T(`E${r}`,'',2)}</row>`; r++;
+      xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'ร้านค้า / ผู้รับเงิน',1)}${T(`B${r}`,'ยอดจ่ายรวม (฿)',1)}${T(`C${r}`,'% ของรายจ่าย',1)}${T(`D${r}`,'',1)}${T(`E${r}`,'สัดส่วน (กราฟ)',1)}</row>`; r++;
+      vendBarStart=r;
+      topVendors.forEach(([v,amt])=>{
+        const pct=totalExp>0?Math.round(amt/totalExp*1000)/10:0;
+        xml+=`<row r="${r}">${T(`A${r}`,v,8)}${N(`B${r}`,amt,4)}${T(`C${r}`,pct+'%',8)}${T(`D${r}`,'',8)}${N(`E${r}`,amt,4)}</row>`; r++;
+      });
+      vendBarEnd=r-1;
+      xml+=`<row r="${r}"/>`; r++;
+    }
+
+    // ══ 5. TOP EXPENSE CATEGORIES ══
     const expTypes=Object.keys(EXPENSE_HINTS);
     const expTotals=expTypes.map(et=>({
       et:et.replace(/\s*\(.*\)/,''),
       amount:filteredEntries.filter(e=>e.expenseCat===et).reduce((s,e)=>s+e.amount,0)
     })).filter(x=>x.amount>0).sort((a,b)=>b.amount-a.amount);
+    const uncat=filteredEntries.filter(e=>!expTypes.includes(e.expenseCat)).reduce((s,e)=>s+e.amount,0);
+    if(uncat>0) expTotals.push({et:'(ไม่ระบุประเภท)',amount:uncat});
+    let expBarStart=0, expBarEnd=0;
     if(expTotals.length){
-      xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'ค่าใช้จ่ายสูงสุด (Top Expenses)',2)}${T(`B${r}`,'',2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}</row>`;
-      r++;
-      xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'ประเภท',1)}${T(`B${r}`,'จำนวนเงิน (฿)',1)}${T(`C${r}`,'%',1)}${T(`D${r}`,'สัดส่วน (กราฟ)',1)}</row>`;
-      r++;
-      const expBarStart=r;
+      xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'5) เงินหมดไปกับอะไร (ประเภทค่าใช้จ่าย)',2)}${T(`B${r}`,'',2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}${T(`E${r}`,'',2)}</row>`; r++;
+      xml+=`<row r="${r}" ht="18" customHeight="1">${T(`A${r}`,'ประเภท',1)}${T(`B${r}`,'จำนวนเงิน (฿)',1)}${T(`C${r}`,'%',1)}${T(`D${r}`,'',1)}${T(`E${r}`,'สัดส่วน (กราฟ)',1)}</row>`; r++;
+      expBarStart=r;
       expTotals.forEach(x=>{
         const pct=totalExp>0?Math.round(x.amount/totalExp*1000)/10:0;
-        xml+=`<row r="${r}">${T(`A${r}`,x.et,8)}${N(`B${r}`,x.amount,4)}${T(`C${r}`,pct+'%',8)}${N(`D${r}`,x.amount,4)}</row>`;
-        r++;
+        xml+=`<row r="${r}">${T(`A${r}`,x.et,8)}${N(`B${r}`,x.amount,4)}${T(`C${r}`,pct+'%',8)}${T(`D${r}`,'',8)}${N(`E${r}`,x.amount,4)}</row>`; r++;
       });
-      var expBarEnd=r-1;
-      var expBarRange=`D${expBarStart}:D${expBarEnd}`;
+      expBarEnd=r-1;
+      xml+=`<row r="${r}"/>`; r++;
     }
 
+    // ══ 6. PAYMENT SPLIT ══
+    xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'6) วิธีชำระเงิน',2)}${T(`B${r}`,'',2)}${T(`C${r}`,'',2)}${T(`D${r}`,'',2)}${T(`E${r}`,'',2)}</row>`; r++;
+    const paySplitStart=r;
+    xml+=`<row r="${r}">${T(`A${r}`,'💵 เงินสด (Cash)',8)}${N(`B${r}`,totalCash,4)}${T(`C${r}`,(totalExp>0?Math.round(totalCash/totalExp*100):0)+'%',8)}${T(`D${r}`,'',8)}${N(`E${r}`,totalCash,4)}</row>`; r++;
+    xml+=`<row r="${r}">${T(`A${r}`,'🏦 โอนเงิน (Transfer)',8)}${N(`B${r}`,totalTransfer,4)}${T(`C${r}`,(totalExp>0?Math.round(totalTransfer/totalExp*100):0)+'%',8)}${T(`D${r}`,'',8)}${N(`E${r}`,totalTransfer,4)}</row>`;
+    const paySplitEnd=r; r++;
+
     xml+='</sheetData>';
-    // data bars
-    xml+=`<conditionalFormatting sqref="D11:D12"><cfRule type="dataBar" priority="1"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF1A5276"/></dataBar></cfRule></conditionalFormatting>`;
-    if(typeof expBarRange!=='undefined'){
-      xml+=`<conditionalFormatting sqref="${expBarRange}"><cfRule type="dataBar" priority="2"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FFA32D2D"/></dataBar></cfRule></conditionalFormatting>`;
-    }
+
+    // ── Data bars (column E of each section) ──
+    let prio=1;
+    if(deptBarEnd>=deptBarStart) xml+=`<conditionalFormatting sqref="E${deptBarStart}:E${deptBarEnd}"><cfRule type="dataBar" priority="${prio++}"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FFA32D2D"/></dataBar></cfRule></conditionalFormatting>`;
+    if(vendBarEnd>=vendBarStart&&vendBarStart>0) xml+=`<conditionalFormatting sqref="E${vendBarStart}:E${vendBarEnd}"><cfRule type="dataBar" priority="${prio++}"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF2E75B6"/></dataBar></cfRule></conditionalFormatting>`;
+    if(expBarEnd>=expBarStart&&expBarStart>0) xml+=`<conditionalFormatting sqref="E${expBarStart}:E${expBarEnd}"><cfRule type="dataBar" priority="${prio++}"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF6B3FA0"/></dataBar></cfRule></conditionalFormatting>`;
+    xml+=`<conditionalFormatting sqref="E${paySplitStart}:E${paySplitEnd}"><cfRule type="dataBar" priority="${prio++}"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF1A5276"/></dataBar></cfRule></conditionalFormatting>`;
+
     xml+='</worksheet>';
     sheetXmls.push(xml); sheetNames.push('🏠 Dashboard'); sheetColors.push('FF1D9E75');
   }
