@@ -16,6 +16,19 @@ var ownerPinSetupStage = 0;
 var ownerPinSetupFirst = '';
 var selectedPayment = 'transfer';
 var editPaymentMethod = 'transfer';
+
+// Expense categories (declared early so init() can access before main script)
+var EXPENSE_HINTS = {
+  'ต้นทุนขาย (Cost of Goods Sold)':         'วัตถุดิบ, บรรจุภัณฑ์',
+  'ค่าแรงงาน (Labor)':                       'เงินเดือน, ค่าแรงชั่วคราว, OT',
+  'ค่าสาธารณูปโภค (Utilities)':              'ค่าไฟ, ค่าน้ำ, แก๊ส, อินเทอร์เน็ต',
+  'ค่าเช่า (Rent)':                          'ค่าเช่าพื้นที่, ค่าเช่าอุปกรณ์',
+  'การตลาด (Marketing)':                     'โฆษณา, Delivery platform, Promotion',
+  'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)': 'ค่าส่งของ, น้ำมันรถส่งของ, ค่าขนส่ง',
+  'ค่าแพ็คเกจจิ้ง (Packaging)':              'กล่อง, ถุง, แก้ว, ฉลาก, บรรจุภัณฑ์',
+  'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)': 'ซ่อมเครื่องมือ, ซื้ออุปกรณ์ครัว',
+  'ค่าใช้จ่ายทั่วไป (General & Admin)':      'เครื่องเขียน, ค่าธรรมเนียมธนาคาร, ของใช้สำนักงาน'
+};
 </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" onerror="window.XLSX_FAILED=true"></script>
@@ -1478,6 +1491,8 @@ function setAddMode(mode) {
   const importSection = document.getElementById('tab-import-section');
   const addBtn = document.getElementById('add-mode-btn');
   const importBtn = document.getElementById('import-mode-btn');
+  // ensure expense dropdown is populated whenever entering the add form
+  populateExpenseCatDropdown();
 
   if(mode === 'import') {
     formSection.style.display = 'none';
@@ -3047,17 +3062,7 @@ function updateSplitAmt(id, idx, amt) {
 /* ═══════════════════════════════════════════
    EXPENSE CATEGORY HINTS
    ═══════════════════════════════════════════ */
-const EXPENSE_HINTS = {
-  'ต้นทุนขาย (Cost of Goods Sold)':         'วัตถุดิบ, บรรจุภัณฑ์',
-  'ค่าแรงงาน (Labor)':                       'เงินเดือน, ค่าแรงชั่วคราว, OT',
-  'ค่าสาธารณูปโภค (Utilities)':              'ค่าไฟ, ค่าน้ำ, แก๊ส, อินเทอร์เน็ต',
-  'ค่าเช่า (Rent)':                          'ค่าเช่าพื้นที่, ค่าเช่าอุปกรณ์',
-  'การตลาด (Marketing)':                     'โฆษณา, Delivery platform, Promotion',
-  'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)': 'ค่าส่งของ, น้ำมันรถส่งของ, ค่าขนส่ง',
-  'ค่าแพ็คเกจจิ้ง (Packaging)':              'กล่อง, ถุง, แก้ว, ฉลาก, บรรจุภัณฑ์',
-  'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)': 'ซ่อมเครื่องมือ, ซื้ออุปกรณ์ครัว',
-  'ค่าใช้จ่ายทั่วไป (General & Admin)':      'เครื่องเขียน, ค่าธรรมเนียมธนาคาร, ของใช้สำนักงาน'
-};
+
 
 function updateExpenseHint() {
   const val = document.getElementById('f-expense-cat').value;
