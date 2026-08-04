@@ -15,6 +15,7 @@ var ownerPinBuffer = '';
 var ownerPinSetupStage = 0;
 var ownerPinSetupFirst = '';
 var selectedPayment = 'transfer';
+var editPaymentMethod = 'transfer';
 </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" onerror="window.XLSX_FAILED=true"></script>
@@ -118,6 +119,15 @@ var selectedPayment = 'transfer';
   .empty { text-align: center; padding: 3rem; color: var(--text2); font-size: 14px; }
   .del-row { color: var(--text3); background: transparent; border: none; cursor: pointer; padding: 5px; border-radius: 4px; font-size: 15px; display: flex; align-items: center; }
   .del-row:hover { color: var(--red); background: var(--red-light); }
+  .edit-row { color: var(--text3); background: transparent; border: none; cursor: pointer; padding: 5px; border-radius: 4px; font-size: 15px; display: flex; align-items: center; }
+  .edit-row:hover { color: #1a5276; background: #dbeafe; }
+  /* Edit modal */
+  #edit-modal { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:9000; display:none; align-items:center; justify-content:center; padding:1rem; }
+  #edit-modal.show { display:flex; }
+  .edit-modal-box { background:var(--surface); border-radius:var(--radius-lg); max-width:520px; width:100%; max-height:90vh; overflow-y:auto; padding:1.5rem; }
+  .edit-modal-box h3 { font-size:16px; font-weight:600; margin-bottom:1rem; display:flex; align-items:center; gap:8px; }
+  .edit-modal-box .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .edit-modal-box .form-group.full { grid-column:1/-1; }
   .rec-total { text-align: right; padding-top: 12px; font-size: 13px; color: var(--text2); }
 
   /* Categories */
@@ -402,6 +412,57 @@ var selectedPayment = 'transfer';
         <div class="card-title">ประวัติการเติมเงินสด</div>
         <div id="topup-history-list"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT TRANSACTION MODAL -->
+<div id="edit-modal">
+  <div class="edit-modal-box">
+    <h3><i class="ti ti-pencil" style="color:#1a5276"></i> แก้ไขรายการ</h3>
+    <input type="hidden" id="edit-entry-id">
+    <div class="form-grid">
+      <div class="form-group">
+        <label><i class="ti ti-calendar" style="font-size:12px;margin-right:4px"></i>วันที่</label>
+        <input type="date" id="edit-date">
+      </div>
+      <div class="form-group">
+        <label><i class="ti ti-currency-baht" style="font-size:12px;margin-right:4px"></i>จำนวนเงิน (฿)</label>
+        <input type="number" id="edit-amount" step="0.01" min="0">
+      </div>
+      <div class="form-group full">
+        <label><i class="ti ti-credit-card" style="font-size:12px;margin-right:4px"></i>วิธีชำระเงิน</label>
+        <div class="payment-toggle">
+          <button type="button" class="payment-btn" id="edit-pay-transfer" onclick="setEditPayment('transfer')"><i class="ti ti-building-bank"></i> โอนเงิน</button>
+          <button type="button" class="payment-btn" id="edit-pay-cash" onclick="setEditPayment('cash')"><i class="ti ti-cash"></i> เงินสด</button>
+        </div>
+        <div style="font-size:11px;color:#BA7517;margin-top:5px" id="edit-pay-warning"></div>
+      </div>
+      <div class="form-group full">
+        <label><i class="ti ti-tag" style="font-size:12px;margin-right:4px"></i>แผนก</label>
+        <div class="dept-checkbox-group" id="edit-category-checks"></div>
+      </div>
+      <div class="form-group full">
+        <label><i class="ti ti-briefcase" style="font-size:12px;margin-right:4px"></i>ประเภทค่าใช้จ่าย</label>
+        <select id="edit-expense-cat" onchange="updateEditExpenseHint()"></select>
+        <div style="font-size:11px;color:var(--text2);margin-top:3px;font-style:italic" id="edit-expense-hint"></div>
+      </div>
+      <div class="form-group full">
+        <label><i class="ti ti-user" style="font-size:12px;margin-right:4px"></i>จ่ายให้</label>
+        <input type="text" id="edit-transfer" placeholder="ชื่อผู้รับเงิน...">
+      </div>
+      <div class="form-group full">
+        <label><i class="ti ti-building" style="font-size:12px;margin-right:4px"></i>บริษัท / ร้านค้า</label>
+        <input type="text" id="edit-company" placeholder="ชื่อบริษัท...">
+      </div>
+      <div class="form-group full">
+        <label><i class="ti ti-notes" style="font-size:12px;margin-right:4px"></i>รายละเอียด</label>
+        <input type="text" id="edit-details" placeholder="รายละเอียด...">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:1.25rem">
+      <button class="btn btn-success" onclick="saveEditEntry()" style="flex:1"><i class="ti ti-check"></i> บันทึกการแก้ไข</button>
+      <button class="btn" onclick="closeEditEntry()"><i class="ti ti-x"></i> ยกเลิก</button>
     </div>
   </div>
 </div>
@@ -786,13 +847,6 @@ var selectedPayment = 'transfer';
             <div class="expense-cat-wrap">
               <select id="f-expense-cat" class="expense-cat-select" onchange="updateExpenseHint()">
                 <option value="">— เลือกประเภท —</option>
-                <option value="ต้นทุนขาย (Cost of Goods Sold)">ต้นทุนขาย (Cost of Goods Sold)</option>
-                <option value="ค่าแรงงาน (Labor)">ค่าแรงงาน (Labor)</option>
-                <option value="ค่าสาธารณูปโภค (Utilities)">ค่าสาธารณูปโภค (Utilities)</option>
-                <option value="ค่าเช่า (Rent)">ค่าเช่า (Rent)</option>
-                <option value="การตลาด (Marketing)">การตลาด (Marketing)</option>
-                <option value="อุปกรณ์และซ่อมบำรุง (Equipment &amp; Maintenance)">อุปกรณ์และซ่อมบำรุง (Equipment &amp; Maintenance)</option>
-                <option value="ค่าใช้จ่ายทั่วไป (General &amp; Admin)">ค่าใช้จ่ายทั่วไป (General &amp; Admin)</option>
               </select>
               <div class="expense-cat-hint" id="expense-cat-hint"></div>
             </div>
@@ -1608,7 +1662,10 @@ function renderRecords(){
       <td class="amount-cell" style="text-align:right">${fmtBaht(e.amount)}</td>
       <td>${e.deleted
         ? `<span class="deleted-badge"><i class="ti ti-trash" style="font-size:10px"></i> ลบแล้ว</span>`
-        : `<button class="del-row" onclick="deleteEntry(${e.id})" title="ลบ"><i class="ti ti-trash"></i></button>`
+        : `<div style="display:flex;gap:4px">
+            <button class="edit-row" onclick="openEditEntry(${e.id})" title="แก้ไข"><i class="ti ti-pencil"></i></button>
+            <button class="del-row" onclick="deleteEntry(${e.id})" title="ลบ"><i class="ti ti-trash"></i></button>
+          </div>`
       }</td>
     </tr>`;
   }).join('');
@@ -2015,7 +2072,7 @@ function buildStyledXlsx() {
     // Per expense type
     xml+=`<row r="${r}" ht="20" customHeight="1">${T(`A${r}`,'ประเภทค่าใช้จ่าย',2)}${T(`B${r}`,'รายการ',2)}${T(`C${r}`,'ยอดรวม (฿)',2)}</row>`;
     r++;
-    const expTypes=['ต้นทุนขาย (Cost of Goods Sold)','ค่าแรงงาน (Labor)','ค่าสาธารณูปโภค (Utilities)','ค่าเช่า (Rent)','การตลาด (Marketing)','อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)','ค่าใช้จ่ายทั่วไป (General & Admin)'];
+    const expTypes=Object.keys(EXPENSE_HINTS);
     expTypes.forEach(et=>{
       const ents=filteredEntries.filter(e=>e.expenseCat===et);
       if(!ents.length)return;
@@ -2255,8 +2312,7 @@ function buildStyledXlsx() {
 
   /* ── 7. EXPENSE BREAKDOWN % SHEET ── */
   {
-    const expTypes=['ต้นทุนขาย (Cost of Goods Sold)','ค่าแรงงาน (Labor)','ค่าสาธารณูปโภค (Utilities)',
-      'ค่าเช่า (Rent)','การตลาด (Marketing)','อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)','ค่าใช้จ่ายทั่วไป (General & Admin)'];
+    const expTypes=Object.keys(EXPENSE_HINTS);
     const allMonths=new Set(filteredEntries.filter(e=>e.dt).map(e=>e.dt.slice(0,7)));
     const months=Array.from(allMonths).sort().reverse();
     if(months.length){
@@ -2422,7 +2478,7 @@ function showToast(msg, isErr=false){
    INIT
    ═══════════════════════════════════════════ */
 function init(){
-  loadLocal(); setDefaultDT(); populateCategorySelect(); updateDriveUI(false);
+  loadLocal(); setDefaultDT(); populateCategorySelect(); populateExpenseCatDropdown(); updateDriveUI(false);
   // restore last backup time
   const lbt = localStorage.getItem('last_backup_time');
   if (lbt) driveState.lastBackupTime = parseInt(lbt);
@@ -2997,6 +3053,8 @@ const EXPENSE_HINTS = {
   'ค่าสาธารณูปโภค (Utilities)':              'ค่าไฟ, ค่าน้ำ, แก๊ส, อินเทอร์เน็ต',
   'ค่าเช่า (Rent)':                          'ค่าเช่าพื้นที่, ค่าเช่าอุปกรณ์',
   'การตลาด (Marketing)':                     'โฆษณา, Delivery platform, Promotion',
+  'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)': 'ค่าส่งของ, น้ำมันรถส่งของ, ค่าขนส่ง',
+  'ค่าแพ็คเกจจิ้ง (Packaging)':              'กล่อง, ถุง, แก้ว, ฉลาก, บรรจุภัณฑ์',
   'อุปกรณ์และซ่อมบำรุง (Equipment & Maintenance)': 'ซ่อมเครื่องมือ, ซื้ออุปกรณ์ครัว',
   'ค่าใช้จ่ายทั่วไป (General & Admin)':      'เครื่องเขียน, ค่าธรรมเนียมธนาคาร, ของใช้สำนักงาน'
 };
@@ -3005,6 +3063,13 @@ function updateExpenseHint() {
   const val = document.getElementById('f-expense-cat').value;
   const hint = document.getElementById('expense-cat-hint');
   if (hint) hint.textContent = EXPENSE_HINTS[val] || '';
+}
+function populateExpenseCatDropdown() {
+  const sel = document.getElementById('f-expense-cat');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— เลือกประเภท —</option>' +
+    Object.keys(EXPENSE_HINTS).map(et=>`<option value="${esc(et)}"${et===cur?' selected':''}>${esc(et)}</option>`).join('');
 }
 /* ═══════════════════════════════════════════
    PIN LOCK
@@ -3667,6 +3732,15 @@ const EXPENSE_CAT_IMPORT_MAP = {
   'general': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
   'admin': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
   'ค่าใช้จ่ายทั่วไป': 'ค่าใช้จ่ายทั่วไป (General & Admin)',
+  'logistics': 'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)',
+  'distribution': 'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)',
+  'logistics & distribution': 'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)',
+  'shipping': 'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)',
+  'ค่าขนส่ง': 'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)',
+  'ค่าขนส่งและกระจายสินค้า': 'ค่าขนส่งและกระจายสินค้า (Logistics & Distribution)',
+  'packaging': 'ค่าแพ็คเกจจิ้ง (Packaging)',
+  'ค่าแพ็คเกจจิ้ง': 'ค่าแพ็คเกจจิ้ง (Packaging)',
+  'แพ็คเกจจิ้ง': 'ค่าแพ็คเกจจิ้ง (Packaging)',
 };
 
 function mapExpenseCat(raw) {
@@ -4319,6 +4393,119 @@ function selectAcct4721Company(company) {
   if(inp) inp.value = company;
   const drop = document.getElementById('acct4721-company-drop');
   if(drop) drop.style.display = 'none';
+}
+/* ═══════════════════════════════════════════
+   EDIT TRANSACTION (in รายการทั้งหมด)
+   ═══════════════════════════════════════════ */
+function openEditEntry(id) {
+  const e = data.entries.find(x=>x.id==id);
+  if(!e) return;
+
+  document.getElementById('edit-entry-id').value = id;
+  document.getElementById('edit-date').value = e.dt ? e.dt.slice(0,10) : '';
+  document.getElementById('edit-amount').value = e.amount || '';
+  document.getElementById('edit-transfer').value = e.transfer || '';
+  document.getElementById('edit-company').value = e.company || '';
+  document.getElementById('edit-details').value = e.details || '';
+
+  // payment method
+  setEditPayment(e.paymentMethod || 'transfer');
+
+  // แผนก pills
+  const checksEl = document.getElementById('edit-category-checks');
+  checksEl.innerHTML = data.categories.map((c,i)=>{
+    const rid = 'edit_cat_'+i;
+    const chk = c===e.category ? ' checked' : '';
+    return `<input type="radio" class="dept-checkbox-item" name="edit-cat-radio" id="${rid}" value="${esc(c)}"${chk}>
+            <label class="dept-checkbox-label" for="${rid}">${esc(c)}</label>`;
+  }).join('');
+  // if none matched (old category), check first
+  if(!data.categories.includes(e.category)) {
+    const first = document.getElementById('edit_cat_0');
+    if(first) first.checked = true;
+  }
+
+  // expense category dropdown
+  const expSel = document.getElementById('edit-expense-cat');
+  expSel.innerHTML = '<option value="">— เลือกประเภท —</option>' +
+    Object.keys(EXPENSE_HINTS).map(et=>
+      `<option value="${esc(et)}"${et===e.expenseCat?' selected':''}>${esc(et)}</option>`
+    ).join('');
+  // if old expenseCat not in list, add it
+  if(e.expenseCat && !Object.keys(EXPENSE_HINTS).includes(e.expenseCat)) {
+    expSel.innerHTML += `<option value="${esc(e.expenseCat)}" selected>${esc(e.expenseCat)} (เดิม)</option>`;
+  }
+  updateEditExpenseHint();
+
+  document.getElementById('edit-modal').classList.add('show');
+}
+
+function setEditPayment(method) {
+  editPaymentMethod = method;
+  document.getElementById('edit-pay-cash').className = 'payment-btn' + (method==='cash'?' selected-cash':'');
+  document.getElementById('edit-pay-transfer').className = 'payment-btn' + (method==='transfer'?' selected-transfer':'');
+}
+
+function updateEditExpenseHint() {
+  const sel = document.getElementById('edit-expense-cat');
+  const hint = document.getElementById('edit-expense-hint');
+  if(sel && hint) hint.textContent = EXPENSE_HINTS[sel.value] || '';
+}
+
+function closeEditEntry() {
+  document.getElementById('edit-modal').classList.remove('show');
+}
+
+function saveEditEntry() {
+  const id = document.getElementById('edit-entry-id').value;
+  const e = data.entries.find(x=>x.id==id);
+  if(!e) { closeEditEntry(); return; }
+
+  const newDate    = document.getElementById('edit-date').value;
+  const newAmount  = parseFloat(document.getElementById('edit-amount').value);
+  const catEl      = document.querySelector('input[name="edit-cat-radio"]:checked');
+  const newCat     = catEl ? catEl.value : e.category;
+  const newExpCat  = document.getElementById('edit-expense-cat').value;
+  const newTransfer= document.getElementById('edit-transfer').value.trim();
+  const newCompany = document.getElementById('edit-company').value.trim();
+  const newDetails = document.getElementById('edit-details').value.trim();
+
+  if(!newDate) { alert('กรุณาเลือกวันที่'); return; }
+  if(isNaN(newAmount)||newAmount<=0) { alert('กรุณากรอกจำนวนเงิน'); return; }
+
+  // ── Adjust cash pockets for the change ──
+  // 1. Reverse the OLD entry's cash effect (if it was cash)
+  const oldWasCash = (e.paymentMethod||'transfer')==='cash';
+  if(oldWasCash && e.category) {
+    if(!data.cashPockets) data.cashPockets = {};
+    data.cashPockets[e.category] = (data.cashPockets[e.category]||0) + e.amount; // refund old
+  }
+  // 2. Apply the NEW entry's cash effect (if now cash)
+  const newIsCash = editPaymentMethod==='cash';
+  if(newIsCash && newCat) {
+    if(!data.cashPockets) data.cashPockets = {};
+    data.cashPockets[newCat] = Math.max(0, (data.cashPockets[newCat]||0) - newAmount); // deduct new
+  }
+
+  // ── Update the entry ──
+  e.dt = newDate + (e.dt && e.dt.length>10 ? e.dt.slice(10) : 'T00:00:00.000Z');
+  e.amount = newAmount;
+  e.category = newCat;
+  e.expenseCat = newExpCat;
+  e.transfer = newTransfer;
+  e.company = newCompany;
+  e.details = newDetails;
+  e.paymentMethod = editPaymentMethod;
+  e.editedBy = driveState.currentUser ? driveState.currentUser.name : 'Unknown';
+  e.editedAt = new Date().toISOString();
+
+  // add company to autocomplete list
+  if(newCompany && !data.companies.includes(newCompany)) data.companies.push(newCompany);
+
+  save();
+  closeEditEntry();
+  renderRecords();
+  showToast('แก้ไขรายการเรียบร้อย ✓');
 }
 </script>
 </body>
