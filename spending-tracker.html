@@ -960,7 +960,12 @@ var EXPENSE_HINTS = {
   <!-- TAB: ส่งออก -->
   <div id="tab-export" style="display:none">
     <div class="card">
-      <div class="card-title">สรุปยอดการใช้จ่าย</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:0">สรุปยอดการใช้จ่าย</div>
+        <select id="summary-month-select" onchange="renderExportSummary()" style="padding:6px 10px;font-size:13px;font-family:inherit;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text)">
+          <option value="">ทุกเดือน (ทั้งหมด)</option>
+        </select>
+      </div>
       <div class="summary-grid" id="summary-grid"></div>
     </div>
     <div class="card">
@@ -1810,16 +1815,36 @@ function deleteCategory(name){
    ═══════════════════════════════════════════ */
 function renderExport(){
   populateExportMonthSelect();
-  const active = data.entries.filter(e=>!e.deleted);
+  populateSummaryMonthSelect();
+  renderExportSummary();
+  updateDriveUI(driveState.signedIn);
+}
+
+function populateSummaryMonthSelect(){
+  const sel = document.getElementById('summary-month-select');
+  if(!sel) return;
+  const cur = sel.value;
+  const months = [...new Set(data.entries.filter(e=>!e.deleted&&e.dt).map(e=>e.dt.slice(0,7)))].sort().reverse();
+  sel.innerHTML = '<option value="">ทุกเดือน (ทั้งหมด)</option>' +
+    months.map(m=>{
+      const [y,mo]=m.split('-');
+      const label = THAI_MONTH_NAMES[parseInt(mo)-1]+' '+y;
+      return `<option value="${m}"${m===cur?' selected':''}>${label}</option>`;
+    }).join('');
+}
+
+function renderExportSummary(){
+  const month = (document.getElementById('summary-month-select')||{}).value || '';
+  let active = data.entries.filter(e=>!e.deleted);
+  if(month) active = active.filter(e=>e.dt && e.dt.slice(0,7)===month);
   const total=active.reduce((s,e)=>s+e.amount,0);
-  let html=`<div class="metric"><div class="metric-label">ยอดรวมทั้งหมด</div><div class="metric-value">${fmtBahtShort(total)}</div></div>`;
+  let html=`<div class="metric"><div class="metric-label">ยอดรวม${month?'เดือนนี้':'ทั้งหมด'}</div><div class="metric-value">${fmtBahtShort(total)}</div></div>`;
   html+=`<div class="metric"><div class="metric-label">จำนวนรายการ</div><div class="metric-value">${active.length} รายการ</div></div>`;
   data.categories.forEach(c=>{
     const v=active.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0);
     html+=`<div class="metric"><div class="metric-label">${esc(c)}</div><div class="metric-value">${fmtBahtShort(v)}</div></div>`;
   });
   document.getElementById('summary-grid').innerHTML=html;
-  updateDriveUI(driveState.signedIn);
 }
 const THAI_MONTH_NAMES = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 const ENG_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -2321,7 +2346,43 @@ function buildStyledXlsx() {
     xml+=`<row r="${lr}">${T(`A${lr}`,'',3)}${T(`B${lr}`,'',3)}${T(`C${lr}`,'',3)}${T(`D${lr}`,'',3)}${T(`E${lr}`,'',3)}${T(`F${lr}`,'ยอดรวม',3)}${N(`G${lr}`,total,3)}${T(`H${lr}`,'',3)}</row>`;
     xml+=`<row r="${lr+1}">${T(`A${lr+1}`,'',3)}${T(`B${lr+1}`,'',3)}${T(`C${lr+1}`,'',3)}${T(`D${lr+1}`,'',3)}${T(`E${lr+1}`,'',3)}${T(`F${lr+1}`,'เงินสด',3)}${N(`G${lr+1}`,cash,3)}${T(`H${lr+1}`,'',3)}</row>`;
     xml+=`<row r="${lr+2}">${T(`A${lr+2}`,'',3)}${T(`B${lr+2}`,'',3)}${T(`C${lr+2}`,'',3)}${T(`D${lr+2}`,'',3)}${T(`E${lr+2}`,'',3)}${T(`F${lr+2}`,'โอนเงิน',3)}${N(`G${lr+2}`,tr,3)}${T(`H${lr+2}`,'',3)}</row>`;
-    xml+='</sheetData></worksheet>';
+
+    // ══ EXPENSE CATEGORY SUMMARY + % + INCOME COMPARISON ══
+    let r2 = lr+4;
+    const catIncome = filteredIncomes.filter(i=>i.category===cat).reduce((s,i)=>s+i.amount,0);
+    xml+=`<row r="${r2}" ht="22" customHeight="1">${T(`A${r2}`,'📊 สรุปประเภทค่าใช้จ่าย — '+cat,2)}${T(`B${r2}`,'',2)}${T(`C${r2}`,'',2)}${T(`D${r2}`,'',2)}${T(`E${r2}`,'',2)}${T(`F${r2}`,'',2)}${T(`G${r2}`,'',2)}${T(`H${r2}`,'',2)}</row>`; r2++;
+    xml+=`<row r="${r2}" ht="18" customHeight="1">${T(`A${r2}`,'ประเภทค่าใช้จ่าย',1)}${T(`B${r2}`,'',1)}${T(`C${r2}`,'จำนวนเงิน (฿)',1)}${T(`D${r2}`,'% ของรายจ่าย',1)}${T(`E${r2}`,'% ของรายรับ',1)}${T(`F${r2}`,'',1)}${T(`G${r2}`,'สัดส่วน (กราฟ)',1)}${T(`H${r2}`,'',1)}</row>`; r2++;
+
+    const expTypesP = Object.keys(EXPENSE_HINTS);
+    const catRows = expTypesP.map(et=>({
+      et: et.replace(/\s*\(.*\)/,''),
+      amount: entries.filter(e=>e.expenseCat===et).reduce((s,e)=>s+e.amount,0)
+    })).filter(x=>x.amount>0).sort((a,b)=>b.amount-a.amount);
+    const uncatP = entries.filter(e=>!expTypesP.includes(e.expenseCat)).reduce((s,e)=>s+e.amount,0);
+    if(uncatP>0) catRows.push({et:'(ไม่ระบุประเภท)',amount:uncatP});
+
+    const pBarStart = r2;
+    catRows.forEach(x=>{
+      const pctExp = total>0 ? Math.round(x.amount/total*1000)/10 : 0;
+      const pctInc = catIncome>0 ? Math.round(x.amount/catIncome*1000)/10 : 0;
+      xml+=`<row r="${r2}">${T(`A${r2}`,x.et,8)}${T(`B${r2}`,'',8)}${N(`C${r2}`,x.amount,4)}${T(`D${r2}`,pctExp+'%',8)}${T(`E${r2}`,catIncome>0?pctInc+'%':'—',8)}${T(`F${r2}`,'',8)}${N(`G${r2}`,x.amount,4)}${T(`H${r2}`,'',8)}</row>`; r2++;
+    });
+    const pBarEnd = r2-1;
+    r2++;
+
+    // Income vs expense bottom line
+    xml+=`<row r="${r2}" ht="20" customHeight="1">${T(`A${r2}`,'💰 เทียบกับรายรับ',2)}${T(`B${r2}`,'',2)}${T(`C${r2}`,'',2)}${T(`D${r2}`,'',2)}${T(`E${r2}`,'',2)}${T(`F${r2}`,'',2)}${T(`G${r2}`,'',2)}${T(`H${r2}`,'',2)}</row>`; r2++;
+    xml+=`<row r="${r2}">${T(`A${r2}`,'รายรับแผนกนี้',1)}${T(`B${r2}`,'',8)}${N(`C${r2}`,catIncome,5)}${T(`D${r2}`,'',8)}${T(`E${r2}`,'',8)}${T(`F${r2}`,'',8)}${T(`G${r2}`,'',8)}${T(`H${r2}`,'',8)}</row>`; r2++;
+    const pctOfInc = catIncome>0 ? Math.round(total/catIncome*1000)/10 : 0;
+    xml+=`<row r="${r2}">${T(`A${r2}`,'รายจ่ายรวม',1)}${T(`B${r2}`,'',8)}${N(`C${r2}`,total,6)}${T(`D${r2}`,catIncome>0?('= '+pctOfInc+'% ของรายรับ'):'ไม่มีข้อมูลรายรับ',8)}${T(`E${r2}`,'',8)}${T(`F${r2}`,'',8)}${T(`G${r2}`,'',8)}${T(`H${r2}`,'',8)}</row>`; r2++;
+    const catNet = catIncome-total;
+    xml+=`<row r="${r2}">${T(`A${r2}`,'กำไร / ขาดทุน',1)}${T(`B${r2}`,'',8)}${N(`C${r2}`,catNet,catNet>=0?5:6)}${T(`D${r2}`,catNet>=0?'กำไร ✓':'⚠ ขาดทุน',8)}${T(`E${r2}`,'',8)}${T(`F${r2}`,'',8)}${T(`G${r2}`,'',8)}${T(`H${r2}`,'',8)}</row>`;
+
+    xml+='</sheetData>';
+    if(pBarEnd>=pBarStart){
+      xml+=`<conditionalFormatting sqref="G${pBarStart}:G${pBarEnd}"><cfRule type="dataBar" priority="1"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FFA32D2D"/></dataBar></cfRule></conditionalFormatting>`;
+    }
+    xml+='</worksheet>';
     sheetXmls.push(xml); sheetNames.push(cat.replace(/[\/\\?*\[\]:'"]/g,'').slice(0,31)||'Sheet'); sheetColors.push('FFA32D2D');
   });
 
