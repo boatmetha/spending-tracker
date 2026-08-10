@@ -368,6 +368,14 @@ var EXPENSE_HINTS = {
   .acct-row-in  td { color:#1a5276; }
   .acct-row-out td { color:var(--red); }
   .acct-bal-col { font-weight:600; }
+
+  /* ── SPLIT PAYMENT ── */
+  .split-row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .split-row select { flex:1; padding:8px 10px; border:0.5px solid var(--border); border-radius:var(--radius); font-size:13px; font-family:inherit; background:var(--surface); color:var(--text); }
+  .split-row input { width:130px; padding:8px 10px; border:0.5px solid var(--border); border-radius:var(--radius); font-size:13px; font-family:inherit; text-align:right; }
+  .split-row .split-del { color:var(--text3); background:transparent; border:none; cursor:pointer; padding:6px; border-radius:4px; font-size:15px; }
+  .split-row .split-del:hover { color:var(--red); background:var(--red-light); }
+  #split-toggle-btn.active { background:var(--text); color:#fff; border-color:transparent; }
 </style>
 </head>
 <body>
@@ -821,7 +829,7 @@ var EXPENSE_HINTS = {
           </div>
           <div class="form-group">
             <label><i class="ti ti-currency-baht" style="font-size:12px;margin-right:4px"></i>จำนวนเงิน (฿)</label>
-            <input type="number" id="f-amount" placeholder="0.00" min="0" step="0.01">
+            <input type="number" id="f-amount" placeholder="0.00" min="0" step="0.01" oninput="if(splitMode)updateSplitSum()">
           </div>
           <div class="form-group">
             <label><i class="ti ti-user" style="font-size:12px;margin-right:4px"></i>จ่ายให้</label>
@@ -848,8 +856,23 @@ var EXPENSE_HINTS = {
             <div class="cash-warning" id="cash-pocket-warning"></div>
           </div>
           <div class="form-group full">
-            <label><i class="ti ti-tag" style="font-size:12px;margin-right:4px"></i>แผนก</label>
+            <label style="display:flex;align-items:center;justify-content:space-between">
+              <span><i class="ti ti-tag" style="font-size:12px;margin-right:4px"></i>แผนก</span>
+              <button type="button" class="btn" id="split-toggle-btn" onclick="toggleSplitMode()" style="padding:4px 10px;font-size:11px">
+                <i class="ti ti-arrows-split-2"></i> แบ่งหลายแผนก
+              </button>
+            </label>
             <div class="dept-checkbox-group" id="f-category-checks"></div>
+            <!-- SPLIT MODE -->
+            <div id="split-container" style="display:none;margin-top:8px">
+              <div id="split-rows"></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:8px">
+                <button type="button" class="btn" onclick="addSplitRow()" style="padding:5px 10px;font-size:12px">
+                  <i class="ti ti-plus"></i> เพิ่มแผนก
+                </button>
+                <div id="split-sum-info" style="font-size:12px;font-weight:500"></div>
+              </div>
+            </div>
           </div>
           <div class="form-group full">
             <label><i class="ti ti-notes" style="font-size:12px;margin-right:4px"></i>รายละเอียด / หมายเหตุ</label>
@@ -1565,6 +1588,10 @@ function clearForm(){
   ['f-amount','f-transfer','f-company','f-details','f-expense-cat'].forEach(id=>document.getElementById(id).value='');
   selectPayment('transfer');
   setDefaultDT();
+  // reset split mode
+  if(splitMode) toggleSplitMode();
+  const sr = document.getElementById('split-rows');
+  if(sr) sr.innerHTML = '';
 }
 
 /* ═══════════════════════════════════════════
@@ -1575,20 +1602,47 @@ function previewEntry() {
   const amount=parseFloat(document.getElementById('f-amount').value);
   const transfer=document.getElementById('f-transfer').value.trim();
   const company=document.getElementById('f-company').value.trim();
-  const category=getSelectedCategory();
   const paymentMethod=getSelectedPayment();
   const details=document.getElementById('f-details').value.trim();
   if(!dt){alert('กรุณาเลือกวันที่และเวลา');return;}
   if(isNaN(amount)||amount<=0){alert('กรุณากรอกจำนวนเงินให้ถูกต้อง');return;}
-  if(!category){alert('กรุณาเลือกแผนก');return;}
+
+  let splits = null;
+  let category = '';
+
+  if(splitMode) {
+    // ── SPLIT MODE validation ──
+    splits = getSplitRows().filter(s=>s.category||s.amount>0);
+    if(splits.length < 2){alert('โหมดแบ่งหลายแผนก ต้องมีอย่างน้อย 2 แผนก');return;}
+    for(const s of splits){
+      if(!s.category){alert('กรุณาเลือกแผนกให้ครบทุกแถว');return;}
+      if(s.amount<=0){alert('กรุณากรอกจำนวนเงินให้ครบทุกแถว');return;}
+    }
+    const dup = splits.map(s=>s.category).filter((c,i,a)=>a.indexOf(c)!==i);
+    if(dup.length){alert('แผนกซ้ำกัน: '+dup[0]+' — รวมยอดเป็นแถวเดียวแทน');return;}
+    const sum = splits.reduce((s,x)=>s+x.amount,0);
+    if(Math.abs(sum-amount)>0.02){alert('ยอดแบ่งรวม '+fmtBaht(sum)+' ไม่เท่ากับจำนวนเงิน '+fmtBaht(amount));return;}
+  } else {
+    category=getSelectedCategory();
+    if(!category){alert('กรุณาเลือกแผนก');return;}
+  }
+
   pendingEntry={id:Date.now(),dt,amount,transfer,company,category,details,expenseCat:document.getElementById('f-expense-cat').value,paymentMethod};
-  const color=catColor(category);
+  if(splits) pendingEntry.splits = splits;
+
+  const catDisplay = splits
+    ? splits.map(s=>{
+        const c=catColor(s.category);
+        return `<span class="badge" style="background:${c}22;color:${c};margin-right:4px">${esc(s.category)} ${fmtBaht(s.amount)}</span>`;
+      }).join('')
+    : (()=>{const color=catColor(category);return `<span class="badge" style="background:${color}22;color:${color}">${esc(category)}</span>`;})();
+
   const rows=[
     {label:'วันที่',v:fmtDT(dt),icon:'ti-calendar'},
     {label:'จ่ายให้',v:transfer||'—',icon:'ti-user'},
     {label:'บริษัท / ร้านค้า',v:company||'—',icon:'ti-building'},
     {label:'วิธีชำระ',v:paymentMethod==='cash'?'💵 เงินสด (Cash)':'🏦 โอนเงิน (Transfer)',icon:'ti-credit-card'},
-    {label:'แผนก',v:`<span class="badge" style="background:${color}22;color:${color}">${esc(category)}</span>`,icon:'ti-tag',html:true},
+    {label:splits?'แบ่งแผนก ('+splits.length+')':'แผนก',v:catDisplay,icon:'ti-tag',html:true},
     {label:'รายละเอียด',v:details||'—',icon:'ti-notes'},
     {label:'ประเภทค่าใช้จ่าย',v:document.getElementById('f-expense-cat').value||'—',icon:'ti-briefcase'},
     {label:'จำนวนเงิน',v:fmtBaht(amount),icon:'ti-currency-baht',big:true,amt:true},
@@ -1604,8 +1658,43 @@ function previewEntry() {
 function backToForm(){ document.getElementById('confirm-section').style.display='none'; document.getElementById('form-section').style.display=''; }
 function confirmEntry(){
   if(!pendingEntry) return;
-  pendingEntry.createdBy  = driveState.currentUser ? driveState.currentUser.name : 'Unknown';
-  pendingEntry.createdAt  = new Date().toISOString();
+  const who = driveState.currentUser ? driveState.currentUser.name : 'Unknown';
+  const nowISO = new Date().toISOString();
+
+  if(pendingEntry.splits && pendingEntry.splits.length){
+    // ── SPLIT: create one entry per แผนก ──
+    pendingEntry.splits.forEach((s,i)=>{
+      const entry = {
+        id: Date.now()+Math.random(),
+        dt: pendingEntry.dt,
+        amount: s.amount,
+        transfer: pendingEntry.transfer,
+        company: pendingEntry.company,
+        category: s.category,
+        details: (pendingEntry.details? pendingEntry.details+' ' : '') + '(แบ่งจ่าย '+(i+1)+'/'+pendingEntry.splits.length+')',
+        expenseCat: pendingEntry.expenseCat,
+        paymentMethod: pendingEntry.paymentMethod,
+        createdBy: who, createdAt: nowISO
+      };
+      data.entries.unshift(entry);
+      if(entry.paymentMethod==='cash' && entry.category){
+        if(!data.cashPockets) data.cashPockets = {};
+        data.cashPockets[entry.category] = Math.max(0, (data.cashPockets[entry.category]||0) - entry.amount);
+      }
+    });
+    if(pendingEntry.company&&!data.companies.includes(pendingEntry.company)) data.companies.push(pendingEntry.company);
+    save();
+    const n = pendingEntry.splits.length;
+    pendingEntry=null;
+    document.getElementById('confirm-section').style.display='none';
+    document.getElementById('form-section').style.display='';
+    clearForm();
+    showToast('บันทึกแบ่งจ่าย '+n+' แผนกเรียบร้อย ✓');
+    return;
+  }
+
+  pendingEntry.createdBy  = who;
+  pendingEntry.createdAt  = nowISO;
   data.entries.unshift(pendingEntry);
   if(pendingEntry.company&&!data.companies.includes(pendingEntry.company)) data.companies.push(pendingEntry.company);
   // deduct cash pocket if payment is cash
@@ -4458,6 +4547,69 @@ function selectAcct4721Company(company) {
   const drop = document.getElementById('acct4721-company-drop');
   if(drop) drop.style.display = 'none';
 }
+/* ═══════════════════════════════════════════
+   SPLIT PAYMENT ACROSS แผนก
+   ═══════════════════════════════════════════ */
+var splitMode = false;
+
+function toggleSplitMode() {
+  splitMode = !splitMode;
+  const btn = document.getElementById('split-toggle-btn');
+  const pills = document.getElementById('f-category-checks');
+  const cont = document.getElementById('split-container');
+  if(splitMode) {
+    btn.classList.add('active');
+    pills.style.display = 'none';
+    cont.style.display = '';
+    if(!document.querySelectorAll('#split-rows .split-row').length) {
+      addSplitRow(); addSplitRow(); // start with 2 rows
+    }
+    updateSplitSum();
+  } else {
+    btn.classList.remove('active');
+    pills.style.display = '';
+    cont.style.display = 'none';
+  }
+}
+
+function addSplitRow() {
+  const wrap = document.getElementById('split-rows');
+  const row = document.createElement('div');
+  row.className = 'split-row';
+  row.innerHTML =
+    '<select onchange="updateSplitSum()">' +
+      '<option value="">— เลือกแผนก —</option>' +
+      data.categories.map(c=>'<option value="'+esc(c)+'">'+esc(c)+'</option>').join('') +
+    '</select>' +
+    '<input type="number" placeholder="0.00" min="0" step="0.01" oninput="updateSplitSum()">' +
+    '<button type="button" class="split-del" onclick="this.parentElement.remove();updateSplitSum()" title="ลบแถว"><i class="ti ti-x"></i></button>';
+  wrap.appendChild(row);
+}
+
+function getSplitRows() {
+  return [...document.querySelectorAll('#split-rows .split-row')].map(row=>({
+    category: row.querySelector('select').value,
+    amount: parseFloat(row.querySelector('input').value) || 0
+  }));
+}
+
+function updateSplitSum() {
+  const total = parseFloat(document.getElementById('f-amount').value) || 0;
+  const splits = getSplitRows();
+  const sum = splits.reduce((s,x)=>s+x.amount,0);
+  const diff = Math.round((total-sum)*100)/100;
+  const el = document.getElementById('split-sum-info');
+  if(!el) return;
+  if(total<=0) { el.innerHTML = '<span style="color:var(--text2)">กรอกจำนวนเงินรวมด้านบนก่อน</span>'; return; }
+  if(Math.abs(diff)<=0.02) {
+    el.innerHTML = '<span style="color:var(--green-dark)">✓ แบ่งครบ '+fmtBaht(sum)+'</span>';
+  } else if(diff>0) {
+    el.innerHTML = '<span style="color:#BA7517">เหลืออีก '+fmtBaht(diff)+' จากยอดรวม '+fmtBaht(total)+'</span>';
+  } else {
+    el.innerHTML = '<span style="color:var(--red)">เกินยอดรวม '+fmtBaht(-diff)+'</span>';
+  }
+}
+
 /* ═══════════════════════════════════════════
    EDIT TRANSACTION (in รายการทั้งหมด)
    ═══════════════════════════════════════════ */
