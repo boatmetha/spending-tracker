@@ -647,6 +647,33 @@ var EXPENSE_HINTS = {
       </div>
     </div>
 
+    <!-- Income import -->
+    <div class="card">
+      <div class="card-title"><i class="ti ti-file-import" style="color:var(--green)"></i> นำเข้ารายรับ (Import Excel)</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">รองรับไฟล์ .xlsx ที่มี columns: <code>เดือน, แผนก, แหล่งรายรับ, จำนวนเงิน</code> (หมายเหตุ optional)</p>
+      <div class="import-zone" id="income-import-zone"
+        onclick="document.getElementById('income-import-input').click()"
+        ondragover="event.preventDefault();this.classList.add('drag')"
+        ondragleave="this.classList.remove('drag')"
+        ondrop="event.preventDefault();this.classList.remove('drag');handleIncomeImport(event.dataTransfer.files[0])">
+        <i class="ti ti-file-spreadsheet"></i>
+        <div style="font-size:14px;font-weight:500">คลิกหรือลากไฟล์ Excel มาวางที่นี่</div>
+        <div style="font-size:12px;margin-top:4px">.xlsx เท่านั้น</div>
+      </div>
+      <input type="file" id="income-import-input" accept=".xlsx" style="display:none" onchange="handleIncomeImport(this.files[0])">
+      <div id="income-import-status" style="font-size:13px;margin-top:8px;min-height:16px"></div>
+      <div id="income-import-preview" class="import-preview" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+          <div id="income-import-summary" style="font-size:13px"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="clearIncomeImport()"><i class="ti ti-x"></i> ยกเลิก</button>
+            <button class="btn btn-success" id="income-import-confirm-btn" onclick="confirmIncomeImport()"><i class="ti ti-check"></i> ยืนยัน Import</button>
+          </div>
+        </div>
+        <div id="income-import-table-wrap"></div>
+      </div>
+    </div>
+
     <!-- Income records table -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -4783,6 +4810,172 @@ function saveEditEntry() {
   closeEditEntry();
   renderRecords();
   showToast('แก้ไขรายการเรียบร้อย ✓');
+}
+/* ═══════════════════════════════════════════
+   INCOME IMPORT (in รายรับ tab)
+   ═══════════════════════════════════════════ */
+let incomeImportRows = [];
+
+function parseImportMonth(raw) {
+  if(!raw) return '';
+  const s = String(raw).trim();
+  // Already YYYY-MM
+  if(/^\d{4}-\d{2}$/.test(s)) return s;
+  // Full date (DD/MM/YYYY etc.) -> take year-month via parseImportDate, only if it actually produced ISO
+  const full = parseImportDate(raw);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(full)) return full.slice(0,7);
+  // MM/YYYY or M/YYYY (Christian)
+  let m = s.match(/^(\d{1,2})[\/\-](\d{4})$/);
+  if(m) return m[2]+'-'+m[1].padStart(2,'0');
+  // MM/YY (Buddhist e.g. 6/69)
+  m = s.match(/^(\d{1,2})[\/\-](\d{2,3})$/);
+  if(m) {
+    let yr = parseInt(m[2]);
+    if(yr<100) yr+=2500; else if(yr<1000) yr+=2000;
+    yr -= 543;
+    return yr+'-'+m[1].padStart(2,'0');
+  }
+  return s;
+}
+
+async function handleIncomeImport(file) {
+  if(!file) return;
+  if(!file.name.endsWith('.xlsx')){
+    document.getElementById('income-import-status').innerHTML = '<span style="color:var(--red)">✗ รองรับเฉพาะไฟล์ .xlsx เท่านั้น</span>';
+    return;
+  }
+  if(!window.XLSX || window.XLSX_FAILED) {
+    document.getElementById('income-import-status').innerHTML = '<span style="color:var(--red)">✗ XLSX library ยังไม่โหลด — กรุณารีเฟรชหน้าแล้วลองใหม่</span>';
+    return;
+  }
+  document.getElementById('income-import-status').innerHTML = '<span class="spinner" style="margin-right:6px"></span>กำลังอ่านไฟล์...';
+
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:false});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, {defval:'', header:1});
+    if(raw.length < 2) {
+      document.getElementById('income-import-status').innerHTML = '<span style="color:var(--red)">✗ ไม่พบข้อมูลในไฟล์</span>';
+      return;
+    }
+
+    const headers = raw[0].map(h=>String(h||''));
+    const h = headers.map(s=>s.toLowerCase().trim());
+    const find = (...keys) => { for(const k of keys){ const i=h.findIndex(x=>x.includes(k)); if(i>=0) return headers[i]; } return null; };
+    const colMap = {
+      month:  find('เดือน','month'),
+      category: find('แผนก','category','department'),
+      source: find('แหล่งรายรับ','source','แหล่ง'),
+      amount: find('จำนวนเงิน','amount','จำนวน','price'),
+      note:   find('หมายเหตุ','note','remark','memo'),
+    };
+
+    if(!colMap.month || !colMap.amount) {
+      document.getElementById('income-import-status').innerHTML =
+        `<span style="color:var(--red)">✗ ไม่พบ column ที่จำเป็น — ต้องมี "เดือน" และ "จำนวนเงิน"<br>พบ columns: ${headers.join(', ')}</span>`;
+      return;
+    }
+
+    incomeImportRows = [];
+    raw.slice(1).forEach((row,ri)=>{
+      const get = col => col ? String(row[headers.indexOf(col)]||'').trim() : '';
+      const month = parseImportMonth(row[headers.indexOf(colMap.month)]);
+      const amount = parseFloat(String(row[headers.indexOf(colMap.amount)]).replace(/,/g,''));
+      const rawCat = get(colMap.category);
+      const category = mapCategory(rawCat) || data.categories[0]||'';
+      const source = get(colMap.source) || 'ไม่ระบุ';
+      const note = get(colMap.note);
+
+      let status='ok'; const issues=[];
+      if(!month || month.length<7) { issues.push('เดือนไม่ถูกต้อง'); status='err'; }
+      if(isNaN(amount)||amount<=0) { issues.push('จำนวนเงินไม่ถูกต้อง'); status='err'; }
+      if(!data.categories.includes(category)) { issues.push('แผนก "'+rawCat+'" ไม่ตรง'); if(status!=='err') status='warn'; }
+
+      incomeImportRows.push({month,amount,category,source,note,status,issues,_row:ri+2});
+    });
+
+    renderIncomeImportPreview();
+  } catch(err) {
+    console.error('Income import error:', err);
+    document.getElementById('income-import-status').innerHTML = `<span style="color:var(--red)">✗ อ่านไฟล์ไม่สำเร็จ: ${err.message}</span>`;
+  }
+}
+
+function renderIncomeImportPreview() {
+  const ok = incomeImportRows.filter(r=>r.status==='ok').length;
+  const warn = incomeImportRows.filter(r=>r.status==='warn').length;
+  const err = incomeImportRows.filter(r=>r.status==='err').length;
+
+  document.getElementById('income-import-status').innerHTML = '';
+  document.getElementById('income-import-summary').innerHTML =
+    `พบ <strong>${incomeImportRows.length}</strong> แถว &nbsp;|&nbsp; ` +
+    `<span style="color:var(--green-dark)">✓ OK: ${ok}</span> &nbsp; ` +
+    `<span style="color:#BA7517">⚠ Warning: ${warn}</span> &nbsp; ` +
+    `<span style="color:var(--red)">✗ Error: ${err}</span>` +
+    (err>0 ? `<br><small style="color:var(--text2)">แถวที่มี Error จะไม่ถูก import</small>` : '');
+
+  const btn = document.getElementById('income-import-confirm-btn');
+  if(btn) btn.disabled = (ok+warn)===0;
+
+  const html = `<table>
+    <thead><tr>
+      <th>สถานะ</th><th>แถว</th><th>เดือน</th><th>แผนก</th><th>แหล่งรายรับ</th>
+      <th style="text-align:right">จำนวนเงิน</th><th>หมายเหตุ</th>
+    </tr></thead>
+    <tbody>${incomeImportRows.map(r=>`
+      <tr class="import-row-${r.status}">
+        <td>${r.status==='ok'?'<span class="import-tag ok">✓ OK</span>':
+          r.status==='warn'?`<span class="import-tag warn">⚠ ${r.issues.join(', ')}</span>`:
+          `<span class="import-tag err">✗ ${r.issues.join(', ')}</span>`}</td>
+        <td style="color:var(--text2)">${r._row}</td>
+        <td>${esc(r.month)}</td>
+        <td><span style="font-weight:500">${esc(r.category)}</span></td>
+        <td>${esc(r.source)}</td>
+        <td style="text-align:right;font-weight:500">${isNaN(r.amount)?'—':fmtBaht(r.amount)}</td>
+        <td style="font-size:11px;color:var(--text2)">${esc(r.note||'—')}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  document.getElementById('income-import-table-wrap').innerHTML = html;
+  document.getElementById('income-import-preview').style.display = '';
+}
+
+function confirmIncomeImport() {
+  const valid = incomeImportRows.filter(r=>r.status==='ok'||r.status==='warn');
+  if(!valid.length){ alert('ไม่มีแถวที่สามารถ import ได้'); return; }
+
+  const who = driveState.currentUser ? driveState.currentUser.name : 'Import';
+  const nowISO = new Date().toISOString();
+  if(!data.incomes) data.incomes = [];
+  if(!data.incomeSources) data.incomeSources = [];
+  let saved = 0;
+
+  valid.forEach(r=>{
+    const entry = {
+      id: Date.now()+Math.random(),
+      month: r.month, amount: r.amount,
+      category: data.categories.includes(r.category) ? r.category : (data.categories[0]||''),
+      source: r.source||'ไม่ระบุ', note: r.note||'',
+      createdBy: who, createdAt: nowISO
+    };
+    data.incomes.unshift(entry);
+    if(entry.source && !data.incomeSources.includes(entry.source)) data.incomeSources.push(entry.source);
+    saved++;
+  });
+
+  save();
+  clearIncomeImport();
+  showToast(`Import รายรับสำเร็จ ${saved} รายการ ✓`);
+  renderIncomeTable();
+}
+
+function clearIncomeImport() {
+  incomeImportRows = [];
+  document.getElementById('income-import-preview').style.display='none';
+  document.getElementById('income-import-status').innerHTML='';
+  document.getElementById('income-import-table-wrap').innerHTML='';
+  const fi = document.getElementById('income-import-input');
+  if(fi) fi.value='';
 }
 </script>
 </body>
