@@ -1041,6 +1041,16 @@ var EXPENSE_HINTS = {
         <button class="btn" onclick="setExportThisMonth()" style="padding:7px 12px;font-size:12px"><i class="ti ti-calendar-month"></i> เดือนนี้</button>
       </div>
       <div id="export-date-info" style="font-size:12px;color:var(--text2);margin-bottom:12px;min-height:16px"></div>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <label style="font-size:12px;color:var(--text2);font-weight:500">เลือกแผนก (ไม่เลือก = ทุกแผนก)</label>
+          <div style="display:flex;gap:6px">
+            <button class="btn" onclick="setExportDeptAll(true)" style="padding:3px 8px;font-size:11px">เลือกทั้งหมด</button>
+            <button class="btn" onclick="setExportDeptAll(false)" style="padding:3px 8px;font-size:11px">ล้าง</button>
+          </div>
+        </div>
+        <div class="dept-checkbox-group" id="export-dept-checks"></div>
+      </div>
       <button class="btn btn-primary" onclick="exportExcel()"><i class="ti ti-file-spreadsheet"></i> ดาวน์โหลด Excel (.xlsx)</button>
     </div>
   </div>
@@ -1843,8 +1853,32 @@ function deleteCategory(name){
 function renderExport(){
   populateExportMonthSelect();
   populateSummaryMonthSelect();
+  populateExportDeptChecks();
   renderExportSummary();
   updateDriveUI(driveState.signedIn);
+}
+
+function populateExportDeptChecks(){
+  const el = document.getElementById('export-dept-checks');
+  if(!el) return;
+  // preserve currently checked depts if any
+  const prevChecked = new Set([...el.querySelectorAll('input:checked')].map(i=>i.value));
+  el.innerHTML = data.categories.map((c,i)=>{
+    const id = 'exp_dept_'+i;
+    const chk = prevChecked.has(c) ? ' checked' : '';
+    return `<input type="checkbox" class="dept-checkbox-item" id="${id}" value="${esc(c)}"${chk} onchange="updateExportInfo()">
+            <label class="dept-checkbox-label" for="${id}">${esc(c)}</label>`;
+  }).join('');
+}
+
+function setExportDeptAll(checkAll){
+  document.querySelectorAll('#export-dept-checks input').forEach(i=>i.checked=checkAll);
+  updateExportInfo();
+}
+
+function getExportDeptFilter(){
+  const checked = [...document.querySelectorAll('#export-dept-checks input:checked')].map(i=>i.value);
+  return checked; // empty array = all แผนก
 }
 
 function populateSummaryMonthSelect(){
@@ -1949,15 +1983,20 @@ function updateExportInfo(){
     if(from!==expFrom || to!==expTo) sel.value='';
   }
   const {from,to}=getExportDateRange();
+  const deptFilter=getExportDeptFilter();
   const info=document.getElementById('export-date-info');
-  if(!from&&!to){info.textContent='ไม่ได้กรองวันที่ — ส่งออกข้อมูลทั้งหมด';return;}
   const filtered=data.entries.filter(e=>{
     if(e.deleted)return false;
-    if(from&&e.dt<from)return false;
-    if(to&&e.dt>to)return false;
+    const d=(e.dt||'').slice(0,10);
+    if(from&&d<from)return false;
+    if(to&&d>to)return false;
+    if(deptFilter.length && !deptFilter.includes(e.category))return false;
     return true;
   });
-  info.textContent=`กรองแล้ว: ${filtered.length} รายการ | ยอดรวม: ${fmtBaht(filtered.reduce((s,e)=>s+e.amount,0))}`;
+  const parts=[];
+  parts.push(from||to ? 'กรองวันที่แล้ว' : 'ทุกวันที่');
+  parts.push(deptFilter.length ? `เฉพาะ ${deptFilter.length} แผนก` : 'ทุกแผนก');
+  info.innerHTML = `${parts.join(' • ')}<br>${filtered.length} รายการ | ยอดรวม: ${fmtBaht(filtered.reduce((s,e)=>s+e.amount,0))}`;
 }
 
 /* ── Pure-JS Styled Excel Export ── */
@@ -1983,6 +2022,11 @@ function exportExcel(){
       }
     } else if(from){ suffix = `_from_${from}`; }
     else if(to){ suffix = `_to_${to}`; }
+    const deptFilter = (typeof getExportDeptFilter==='function') ? getExportDeptFilter() : [];
+    if(deptFilter.length){
+      const deptSlug = deptFilter.map(d=>d.replace(/[^a-zA-Zก-๙0-9]+/g,'')).join('-').slice(0,40);
+      suffix += `_${deptSlug}`;
+    }
     a.download = suffix ? `SpendingReport${suffix}.xlsx` : `SpendingReport_${new Date().toISOString().slice(0,10)}.xlsx`;
     document.body.appendChild(a); a.click();
     setTimeout(()=>{try{URL.revokeObjectURL(url);a.remove();}catch(x){}},1500);
@@ -2015,21 +2059,27 @@ function exportCSV(){
 function buildStyledXlsx() {
   // ── Date filter ──
   const {from, to} = getExportDateRange();
+  const deptFilter = (typeof getExportDeptFilter==='function') ? getExportDeptFilter() : [];
   const filterEntry = e => {
     if(e.deleted) return false;
     const d = (e.dt||'').slice(0,10);
     if(from && d < from) return false;
     if(to && d > to) return false;
+    if(deptFilter.length && !deptFilter.includes(e.category)) return false;
     return true;
   };
   const filteredEntries = data.entries.filter(filterEntry);
-  // Filter incomes by the same date range (income is month-based YYYY-MM)
+  // Filter incomes by the same date range (income is month-based YYYY-MM) + แผนก
   const filteredIncomes = (data.incomes||[]).filter(inc=>{
     if(!inc.month) return false;
     if(from && inc.month < from.slice(0,7)) return false;
     if(to   && inc.month > to.slice(0,7))   return false;
+    if(deptFilter.length && !deptFilter.includes(inc.category)) return false;
     return true;
   });
+  // categories to actually loop over when building per-แผนก sheets
+  const exportCats = deptFilter.length ? data.categories.filter(c=>deptFilter.includes(c)) : (data.categories||[]);
+  let deptLabel = deptFilter.length ? ' — '+deptFilter.join(', ') : '';
   let dateLabel = '';
   if(from || to){
     if(from && to){
@@ -2041,6 +2091,7 @@ function buildStyledXlsx() {
       dateLabel = ` (${from||'ทั้งหมด'} ถึง ${to||'ทั้งหมด'})`;
     }
   }
+  dateLabel += deptLabel;
   // ── Styles ──
   // xf index: 0=normal, 1=header(dark), 2=header(mid), 3=total, 4=number, 5=cash+, 6=cash-, 7=title, 8=subheader
   const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -2104,7 +2155,7 @@ function buildStyledXlsx() {
 
   /* ── 0. DASHBOARD — executive analysis, readable at first glance ── */
   {
-    const cats = data.categories||[];
+    const cats = exportCats;
     const totalExp = filteredEntries.reduce((s,e)=>s+e.amount,0);
     const totalInc = filteredIncomes.reduce((s,e)=>s+e.amount,0);
     const totalProfit = totalInc - totalExp;
@@ -2248,7 +2299,7 @@ function buildStyledXlsx() {
 
   /* ── 1. SUMMARY SHEET ── */
   {
-    const cats=data.categories||[];
+    const cats=exportCats;
     const exportDate=new Date().toLocaleDateString('th-TH',{day:'2-digit',month:'long',year:'numeric'})+dateLabel;
     const totalAll=filteredEntries.reduce((s,e)=>s+e.amount,0);
     const totalCash=filteredEntries.filter(e=>e.paymentMethod==='cash').reduce((s,e)=>s+e.amount,0);
@@ -2340,7 +2391,7 @@ function buildStyledXlsx() {
   }
 
   /* ── 3. PER-แผนก SHEETS ── */
-  (data.categories||[]).forEach(cat=>{
+  (exportCats).forEach(cat=>{
     const entries=filteredEntries.filter(e=>e.category===cat);
     if(!entries.length)return;
     const hdr=['วันที่','ชำระด้วย','จ่ายให้','บริษัท / ร้านค้า','ประเภทค่าใช้จ่าย','รายละเอียด','จำนวนเงิน (฿)','บันทึกโดย'];
@@ -2414,7 +2465,7 @@ function buildStyledXlsx() {
   });
 
   /* ── 4. CASH DETAIL PER-แผนก SHEETS ── */
-  (data.categories||[]).forEach((cat,idx)=>{
+  (exportCats).forEach((cat,idx)=>{
     const topupEvts=(data.topupHistory||[]).filter(h=>h.category===cat)
       .map(h=>({date:h.date,type:'เติมเงิน',transfer:'',company:'',expenseCat:'',details:'เติมเงินสด',topup:h.amount,spend:0,by:h.by||'Owner'}));
     const spendEvts=filteredEntries.filter(e=>e.category===cat&&e.paymentMethod==='cash')
@@ -2464,7 +2515,7 @@ function buildStyledXlsx() {
     const months = Array.from(allMonths).sort().reverse();
 
     if(months.length) {
-      const cats = data.categories||[];
+      const cats = exportCats;
       const hdr = ['เดือน','รายรับรวม (฿)','รายจ่ายรวม (฿)','กำไร/ขาดทุน (฿)',
         ...cats.flatMap(c=>[`${c} รายรับ`,`${c} รายจ่าย`,`${c} สุทธิ`])];
       const rows = [hdr];
@@ -2523,7 +2574,7 @@ function buildStyledXlsx() {
   }
 
   /* ── 6. PER-แผนก P&L SHEETS ── */
-  (data.categories||[]).forEach(cat=>{
+  (exportCats).forEach(cat=>{
     const allMonths = new Set();
     filteredEntries.filter(e=>e.category===cat).forEach(e=>{ if(e.dt) allMonths.add(e.dt.slice(0,7)); });
     filteredIncomes.filter(e=>e.category===cat).forEach(e=>{ if(e.month) allMonths.add(e.month); });
@@ -2634,7 +2685,7 @@ function buildStyledXlsx() {
 
   /* ── 9. CATEGORY ANALYSIS — spending by expense category per แผนก (with data bars) ── */
   {
-    const cats = data.categories||[];
+    const cats = exportCats;
     const expTypes = Object.keys(EXPENSE_HINTS);
     // short labels for readability
     const shortLabel = et => et.replace(/\s*\(.*\)/,''); // strip English part
