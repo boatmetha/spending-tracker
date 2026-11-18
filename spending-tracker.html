@@ -1063,7 +1063,7 @@ var EXPENSE_HINTS = {
    CONFIG — แก้ไข CLIENT_ID ก่อนใช้งาน
    ═══════════════════════════════════════════ */
 const GDRIVE_CLIENT_ID = '252954085765-lvbsuljmjgip68gt76b7v3jv8iv2c6dk.apps.googleusercontent.com'; // ← ใส่ Client ID จาก Google Cloud Console
-const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive';
+const GDRIVE_SCOPES = 'https://www.googleapis.com/auth/drive openid email profile';
 const DB_FILENAME = 'spending-tracker-db.json';
 const DB_FOLDER_NAME = 'SpendingTracker';
 const BACKUP_FOLDER_NAME = 'backups';
@@ -1113,7 +1113,10 @@ function loadLocal() {
    ═══════════════════════════════════════════ */
 function gapiLoaded() {
   gapi.load('client', async () => {
-    await gapi.client.init({ discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+    try {
+      await gapi.client.init({});
+      await gapi.client.load('https://www.googleapis.com/discovery/v1/apis/drive/v3/rest');
+    } catch(e) { console.error('gapi init error:', e); showToast('โหลด Google API ไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต/ปิด AdBlock แล้วรีเฟรช', true); }
     driveState.gapiReady = true;
     // init token client
     if (window.google && google.accounts) {
@@ -1144,7 +1147,8 @@ function initTokenClient() {
     client_id: GDRIVE_CLIENT_ID,
     scope: GDRIVE_SCOPES,
     callback: async (resp) => {
-      if (resp.error) { showToast('เชื่อมต่อ Drive ไม่สำเร็จ', true); return; }
+      if (resp.error) { console.error('GSI error:', resp); showToast('เชื่อมต่อ Drive ไม่สำเร็จ: ' + (resp.error_description || resp.error), true); return; }
+      if (!window.gapi || !gapi.client) { showToast('Google API ยังไม่พร้อม — รีเฟรชหน้าแล้วลองใหม่', true); return; }
       const expires_at = Date.now() + (resp.expires_in * 1000);
       localStorage.setItem('drive_token', JSON.stringify({ access_token: resp.access_token, expires_at }));
       gapi.client.setToken({ access_token: resp.access_token });
@@ -1157,6 +1161,14 @@ function initTokenClient() {
       scheduleTokenRefresh(resp.expires_in);
       await loadFromDrive();
       if (driveState.pendingSync) syncToDrive('auto');
+    },
+    error_callback: (err) => {
+      console.error('GSI popup error:', err);
+      const t = err && err.type;
+      const msg = t === 'popup_failed_to_open' ? 'เบราว์เซอร์บล็อกหน้าต่าง popup — อนุญาต popup แล้วลองใหม่'
+                : t === 'popup_closed' ? 'ปิดหน้าต่างล็อกอินก่อนเสร็จ'
+                : 'เชื่อมต่อ Drive ไม่สำเร็จ (' + (t || 'unknown') + ')';
+      showToast(msg, true);
     }
   });
 }
@@ -1169,14 +1181,19 @@ function toggleDriveAuth() {
   if (driveState.signedIn) {
     // sign out
     localStorage.removeItem('drive_token');
-    gapi.client.setToken(null);
+    try { gapi.client.setToken(null); } catch(e){}
     driveState.signedIn = false;
     driveState.fileId = null;
     updateDriveUI(false);
     showToast('ออกจาก Google Drive แล้ว');
   } else {
     if (!driveState.tokenClient) { initTokenClient(); }
-    if (driveState.tokenClient) driveState.tokenClient.requestAccessToken({ prompt: 'consent' });
+    if (!driveState.tokenClient) {
+      showToast('โหลด Google Sign-In ไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต/AdBlock แล้วรีเฟรชหน้า', true);
+      return;
+    }
+    driveState.tokenClient.requestAccessToken({ prompt: driveState.everConnected ? '' : 'consent' });
+    driveState.everConnected = true;
   }
 }
 
@@ -1487,6 +1504,13 @@ async function loadFromDrive() {
     const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${driveState.fileId}?alt=media`, {
       headers: { 'Authorization': `Bearer ${gapi.client.getToken().access_token}` }
     });
+    if (!dl.ok) {
+      console.error('Drive load HTTP', dl.status);
+      if (dl.status === 404 || dl.status === 403) showToast('เปิดไฟล์ข้อมูลบน Drive ไม่ได้ (' + dl.status + ') — ให้เจ้าของไฟล์แชร์ spending-tracker-db.json ให้อีเมลนี้เป็น Editor', true);
+      else if (dl.status === 401) { localStorage.removeItem('drive_token'); showToast('Token หมดอายุ — กดเชื่อมต่อ Drive ใหม่', true); }
+      setPillSyncing(false);
+      return;
+    }
     const remoteData = await dl.json();
     // merge: prefer whichever has more entries
     if (remoteData && remoteData.entries) {
